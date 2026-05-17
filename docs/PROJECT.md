@@ -41,6 +41,7 @@ The primary workflow is the local web UI started with `mnemox serve`. The CLI an
 - List and create assets.
 - View linked findings, evidence, notes, and redacted credentials.
 - Use asset filters in search and packet workflows.
+- Detect likely duplicate assets and merge them while preserving links, tags, notes, and aliases.
 
 ### Evidence
 
@@ -83,9 +84,8 @@ The primary workflow is the local web UI started with `mnemox serve`. The CLI an
 
 ## Near-Term Roadmap Order
 
-1. Asset merge/deduplication.
-2. Additional importers: Burp, Nessus, BloodHound.
-3. Evidence citation bundles.
-4. Local semantic search with encrypted embedding cache.
-5. Attack path graph visualization.
-6. Release polish: signed artifacts, Homebrew tap, docs site.
+1. Additional importers: Burp, Nessus, BloodHound.
+2. Evidence citation bundles.
+3. Local semantic search with encrypted embedding cache.
+4. Attack path graph visualization.
+5. Release polish: signed artifacts, Homebrew tap, docs site.

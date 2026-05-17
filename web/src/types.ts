@@ -45,6 +45,16 @@ export type AssetDetail = RecordEnvelope & {
   credentials?: RecordEnvelope[];
 };
 
+export type AssetDuplicateItem = RecordEnvelope & {
+  relation_count?: number;
+};
+
+export type AssetDuplicateGroup = {
+  signature: string;
+  reason: string;
+  items: AssetDuplicateItem[];
+};
+
 export type AttackPath = AssetDetail & {
   risk_score: number;
 };

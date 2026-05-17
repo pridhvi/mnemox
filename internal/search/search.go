@@ -100,7 +100,7 @@ func searchableMaterial(kind string, payload map[string]any) string {
 			parts = append(parts, key+": "+readable(value))
 		}
 	}
-	for _, key := range []string{"affected_scope", "tags", "references", "open_questions"} {
+	for _, key := range []string{"affected_scope", "tags", "aliases", "references", "open_questions"} {
 		if value, ok := payload[key]; ok {
 			parts = append(parts, key+": "+readable(value))
 		}
@@ -124,7 +124,7 @@ func weightedFields(payload map[string]any) map[string]int {
 			fields[value] = 3
 		}
 	}
-	for _, key := range []string{"affected_scope", "tags", "references"} {
+	for _, key := range []string{"affected_scope", "tags", "aliases", "references"} {
 		if values, ok := payload[key].([]any); ok {
 			for _, value := range values {
 				fields[strings.TrimSpace(toString(value))] = 4

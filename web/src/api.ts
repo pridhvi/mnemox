@@ -1,4 +1,4 @@
-import type { AssetDetail, AttackPath, FindingPayload, FindingRecord, RecordEnvelope, SearchHit } from './types';
+import type { AssetDetail, AssetDuplicateGroup, AttackPath, FindingPayload, FindingRecord, RecordEnvelope, SearchHit } from './types';
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(path, {
@@ -42,6 +42,9 @@ export const api = {
   packet: (id: string) => request<{ markdown: string }>(`/api/findings/${id}/packet`),
   assets: () => request<{ items: RecordEnvelope[] }>('/api/assets'),
   asset: (id: string) => request<AssetDetail>(`/api/assets/${id}`),
+  assetDuplicates: () => request<{ items: AssetDuplicateGroup[] }>('/api/assets/duplicates'),
+  mergeAsset: (id: string, duplicateId: string) =>
+    request<AssetDetail>(`/api/assets/${id}/merge`, { method: 'POST', body: JSON.stringify({ duplicate_id: duplicateId }) }),
   createAsset: (payload: { name: string; type: string; value: string; notes: string; tags: string[] }) =>
     request<RecordEnvelope>('/api/assets', { method: 'POST', body: JSON.stringify(payload) }),
   importNmap: (form: FormData) => request<{ assets: number; findings: number; evidence: number }>('/api/import/nmap', { method: 'POST', body: form }),

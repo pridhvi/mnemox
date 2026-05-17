@@ -89,7 +89,9 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/findings/{id}/packet", s.requireUnlock(s.handleFindingPacket))
 	mux.HandleFunc("GET /api/assets", s.requireUnlock(s.handleListAssets))
 	mux.HandleFunc("POST /api/assets", s.requireUnlock(s.handleCreateAsset))
+	mux.HandleFunc("GET /api/assets/duplicates", s.requireUnlock(s.handleAssetDuplicates))
 	mux.HandleFunc("GET /api/assets/{id}", s.requireUnlock(s.handleGetAsset))
+	mux.HandleFunc("POST /api/assets/{id}/merge", s.requireUnlock(s.handleMergeAsset))
 	mux.HandleFunc("POST /api/import/nmap", s.requireUnlock(s.handleImportNmap))
 	mux.HandleFunc("POST /api/import/nuclei", s.requireUnlock(s.handleImportNuclei))
 	mux.HandleFunc("POST /api/import/screenshots", s.requireUnlock(s.handleImportScreenshots))
@@ -527,16 +529,36 @@ func (s *Server) handleGetAsset(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "record is not an asset")
 		return
 	}
-	findings, _ := v.LinkedFrom(rec.ID, "affects_asset")
-	evidence, _ := v.LinkedFrom(rec.ID, "evidence_asset")
-	notes, _ := v.LinkedFrom(rec.ID, "note_asset")
-	credentials, _ := v.LinkedFrom(rec.ID, "credential_asset")
-	response := recordResponse(rec)
-	response["findings"] = recordList(findings, false)
-	response["evidence"] = recordList(evidence, false)
-	response["notes"] = recordList(notes, false)
-	response["credentials"] = recordList(credentials, true)
-	writeJSON(w, http.StatusOK, response)
+	writeJSON(w, http.StatusOK, assetDetailResponse(v, rec))
+}
+
+func (s *Server) handleAssetDuplicates(w http.ResponseWriter, r *http.Request) {
+	groups, err := assetDuplicateGroups(s.currentVault())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": groups})
+}
+
+func (s *Server) handleMergeAsset(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		DuplicateID string `json:"duplicate_id"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if strings.TrimSpace(body.DuplicateID) == "" {
+		writeError(w, http.StatusBadRequest, "duplicate_id is required")
+		return
+	}
+	detail, err := mergeAssetRecords(s.currentVault(), r.PathValue("id"), body.DuplicateID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, detail)
 }
 
 func (s *Server) handleImportNmap(w http.ResponseWriter, r *http.Request) {
@@ -1003,6 +1025,199 @@ func (s *Server) linkTypedRecords(srcID, dstID, srcKind, dstKind, relation strin
 		return fmt.Errorf("target record is %s, expected %s", dst.Kind, dstKind)
 	}
 	return v.AddLink(srcID, dstID, relation)
+}
+
+func mergeAssetRecords(v *vault.Vault, primaryID, duplicateID string) (map[string]any, error) {
+	if primaryID == duplicateID {
+		return nil, fmt.Errorf("cannot merge an asset into itself")
+	}
+	primary, err := v.GetRecord(primaryID)
+	if err != nil {
+		return nil, err
+	}
+	if primary.Kind != "asset" {
+		return nil, fmt.Errorf("primary record is not an asset")
+	}
+	duplicate, err := v.GetRecord(duplicateID)
+	if err != nil {
+		return nil, err
+	}
+	if duplicate.Kind != "asset" {
+		return nil, fmt.Errorf("duplicate record is not an asset")
+	}
+
+	for _, rel := range assetLinkRelations() {
+		linked, err := v.LinkedFrom(duplicateID, rel)
+		if err != nil {
+			return nil, err
+		}
+		for _, rec := range linked {
+			if err := v.AddLink(rec.ID, primaryID, rel); err != nil {
+				return nil, err
+			}
+			if err := v.RemoveLink(rec.ID, duplicateID, rel); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	payload := mergedAssetPayload(primary.Payload, duplicate.Payload)
+	if err := v.UpdateRecord(primaryID, payload); err != nil {
+		return nil, err
+	}
+	if err := v.DeleteRecord(duplicateID); err != nil {
+		return nil, err
+	}
+	updated, err := v.GetRecord(primaryID)
+	if err != nil {
+		return nil, err
+	}
+	return assetDetailResponse(v, updated), nil
+}
+
+func assetDetailResponse(v *vault.Vault, rec vault.Record) map[string]any {
+	findings, _ := v.LinkedFrom(rec.ID, "affects_asset")
+	evidence, _ := v.LinkedFrom(rec.ID, "evidence_asset")
+	notes, _ := v.LinkedFrom(rec.ID, "note_asset")
+	credentials, _ := v.LinkedFrom(rec.ID, "credential_asset")
+	response := recordResponse(rec)
+	response["findings"] = recordList(findings, false)
+	response["evidence"] = recordList(evidence, false)
+	response["notes"] = recordList(notes, false)
+	response["credentials"] = recordList(credentials, true)
+	return response
+}
+
+func assetDuplicateGroups(v *vault.Vault) ([]map[string]any, error) {
+	assets, err := v.Records("asset")
+	if err != nil {
+		return nil, err
+	}
+	type candidate struct {
+		reason string
+		items  []vault.Record
+	}
+	candidates := map[string]candidate{}
+	for _, asset := range assets {
+		keys := assetDuplicateKeys(asset)
+		for _, key := range keys {
+			entry := candidates[key.key]
+			entry.reason = key.reason
+			entry.items = append(entry.items, asset)
+			candidates[key.key] = entry
+		}
+	}
+	groups := []map[string]any{}
+	for key, entry := range candidates {
+		if len(entry.items) < 2 {
+			continue
+		}
+		groups = append(groups, map[string]any{
+			"signature": key,
+			"reason":    entry.reason,
+			"items":     assetRecordsWithRelationCounts(v, entry.items),
+		})
+	}
+	return groups, nil
+}
+
+type assetDuplicateKey struct {
+	key    string
+	reason string
+}
+
+func assetDuplicateKeys(asset vault.Record) []assetDuplicateKey {
+	assetType := normalizeAssetValue(asString(asset.Payload["type"]))
+	name := normalizeAssetValue(asString(asset.Payload["name"]))
+	value := normalizeAssetValue(asString(asset.Payload["value"]))
+	var keys []assetDuplicateKey
+	if assetType != "" && value != "" {
+		keys = append(keys, assetDuplicateKey{key: "type-value:" + assetType + ":" + value, reason: "same type and value"})
+	}
+	if name != "" {
+		keys = append(keys, assetDuplicateKey{key: "name:" + name, reason: "same name"})
+	}
+	if value != "" && name != value {
+		keys = append(keys, assetDuplicateKey{key: "name:" + value, reason: "value matches another asset name"})
+	}
+	return keys
+}
+
+func assetRecordsWithRelationCounts(v *vault.Vault, records []vault.Record) []map[string]any {
+	items := make([]map[string]any, 0, len(records))
+	for _, rec := range records {
+		item := recordResponse(rec)
+		total := 0
+		for _, rel := range assetLinkRelations() {
+			linked, _ := v.LinkedFrom(rec.ID, rel)
+			total += len(linked)
+		}
+		item["relation_count"] = total
+		items = append(items, item)
+	}
+	return items
+}
+
+func assetLinkRelations() []string {
+	return []string{"affects_asset", "evidence_asset", "note_asset", "credential_asset"}
+}
+
+func mergedAssetPayload(primary, duplicate map[string]any) map[string]any {
+	payload := cloneMap(primary)
+	for _, key := range []string{"name", "type", "value"} {
+		if strings.TrimSpace(asString(payload[key])) == "" {
+			payload[key] = asString(duplicate[key])
+		}
+	}
+	payload["tags"] = mergeStringSlices(asStringSlice(primary["tags"]), asStringSlice(duplicate["tags"]))
+	payload["aliases"] = mergeStringSlices(
+		asStringSlice(primary["aliases"]),
+		asStringSlice(duplicate["aliases"]),
+		[]string{asString(duplicate["name"]), asString(duplicate["value"])},
+	)
+	payload["notes"] = mergedNotes(asString(primary["notes"]), asString(duplicate["notes"]), asString(duplicate["name"]), asString(duplicate["value"]))
+	return payload
+}
+
+func mergedNotes(primaryNotes, duplicateNotes, duplicateName, duplicateValue string) string {
+	primaryNotes = strings.TrimSpace(primaryNotes)
+	duplicateNotes = strings.TrimSpace(duplicateNotes)
+	if duplicateNotes == "" {
+		return primaryNotes
+	}
+	source := strings.TrimSpace(strings.Join([]string{duplicateName, duplicateValue}, " "))
+	if source == "" {
+		source = "merged asset"
+	}
+	merged := "Merged from " + source + ":\n" + duplicateNotes
+	if primaryNotes == "" {
+		return merged
+	}
+	return primaryNotes + "\n\n" + merged
+}
+
+func mergeStringSlices(groups ...[]string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, group := range groups {
+		for _, value := range group {
+			value = strings.TrimSpace(value)
+			if value == "" {
+				continue
+			}
+			key := strings.ToLower(value)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			out = append(out, value)
+		}
+	}
+	return out
+}
+
+func normalizeAssetValue(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
 }
 
 func (s *Server) assetRelatedRecords(assetID, kind string) ([]vault.Record, error) {

@@ -646,6 +646,29 @@ label.compact textarea {
   font-size: 12px;
 }
 
+.static-chip {
+  border: 1px solid rgba(83, 167, 255, 0.38);
+  border-radius: 999px;
+  background: rgba(83, 167, 255, 0.08);
+  color: #b9d9ff;
+  font-size: 12px;
+  padding: 4px 8px;
+}
+
+.merge-card {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgba(9, 13, 18, 0.55);
+  padding: 10px;
+  display: grid;
+  gap: 4px;
+}
+
+.merge-card span,
+.merge-card small {
+  color: var(--muted);
+}
+
 .evidence-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));

@@ -179,6 +179,91 @@ func TestWebAPIWorkflowAndCredentialRedaction(t *testing.T) {
 	}
 }
 
+func TestAssetMergeMovesRelationsAndRedactsCredentialContext(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".mnemox")
+	v, err := vault.CreateWithPassphrase(root, "ACME", "test-passphrase")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = v.Close()
+
+	server := New(Options{VaultPath: root, Addr: "127.0.0.1:0"})
+	ts := httptest.NewServer(server.routes())
+	defer ts.Close()
+
+	postJSON(t, ts.URL+"/api/unlock", map[string]any{"passphrase": "test-passphrase"}, http.StatusOK)
+
+	primary := postJSON(t, ts.URL+"/api/assets", map[string]any{
+		"name":  "ci.acme.local",
+		"type":  "host",
+		"value": "ci.acme.local",
+		"tags":  []string{"manual"},
+		"notes": "Primary operator asset.",
+	}, http.StatusCreated)
+	primaryID := primary["id"].(string)
+	duplicate := postJSON(t, ts.URL+"/api/assets", map[string]any{
+		"name":  "ci.acme.local",
+		"type":  "host",
+		"value": "10.0.0.10",
+		"tags":  []string{"import:nmap"},
+		"notes": "Imported scan asset.",
+	}, http.StatusCreated)
+	duplicateID := duplicate["id"].(string)
+
+	duplicates := getJSON(t, ts.URL+"/api/assets/duplicates", http.StatusOK)
+	if len(duplicates["items"].([]any)) != 1 {
+		t.Fatalf("expected duplicate candidate group: %#v", duplicates)
+	}
+
+	finding := postJSON(t, ts.URL+"/api/findings", map[string]any{
+		"title":   "Jenkins anonymous read",
+		"summary": "Jenkins allowed unauthenticated read access.",
+	}, http.StatusCreated)
+	findingID := finding["id"].(string)
+	postJSON(t, ts.URL+"/api/findings/"+findingID+"/assets", map[string]any{"asset_id": duplicateID}, http.StatusOK)
+
+	note := postJSON(t, ts.URL+"/api/findings/"+findingID+"/notes", map[string]any{
+		"text": "Build history was visible",
+	}, http.StatusCreated)
+	postJSON(t, ts.URL+"/api/notes/"+note["id"].(string)+"/assets", map[string]any{"asset_id": duplicateID}, http.StatusOK)
+
+	evidence := uploadEvidence(t, ts.URL+"/api/findings/"+findingID+"/evidence")
+	postJSON(t, ts.URL+"/api/evidence/"+evidence["id"].(string)+"/assets", map[string]any{"asset_id": duplicateID}, http.StatusOK)
+
+	credential := postJSON(t, ts.URL+"/api/credentials", map[string]any{
+		"name":     "svc_backup",
+		"username": "svc_backup",
+		"secret":   "super-secret-value",
+		"scope":    "ci.acme.local",
+	}, http.StatusCreated)
+	postJSON(t, ts.URL+"/api/credentials/"+credential["id"].(string)+"/assets", map[string]any{"asset_id": duplicateID}, http.StatusOK)
+
+	merged := postJSON(t, ts.URL+"/api/assets/"+primaryID+"/merge", map[string]any{"duplicate_id": duplicateID}, http.StatusOK)
+	if len(merged["findings"].([]any)) != 1 || len(merged["evidence"].([]any)) != 1 || len(merged["notes"].([]any)) != 1 || len(merged["credentials"].([]any)) != 1 {
+		t.Fatalf("expected merged asset relation context: %#v", merged)
+	}
+	payload := merged["payload"].(map[string]any)
+	encoded, _ := json.Marshal(payload)
+	if !strings.Contains(string(encoded), "10.0.0.10") || !strings.Contains(string(encoded), "import:nmap") || !strings.Contains(string(encoded), "Imported scan asset.") {
+		t.Fatalf("expected merged aliases, tags, and notes: %s", encoded)
+	}
+	if strings.Contains(string(encoded), "super-secret-value") {
+		t.Fatalf("merged asset payload leaked credential secret: %s", encoded)
+	}
+
+	getJSON(t, ts.URL+"/api/assets/"+duplicateID, http.StatusNotFound)
+	assetList := getJSON(t, ts.URL+"/api/assets", http.StatusOK)
+	if len(assetList["items"].([]any)) != 1 {
+		t.Fatalf("expected duplicate asset to be removed: %#v", assetList)
+	}
+
+	relatedCredentialSearch := getJSON(t, ts.URL+"/api/search?asset_id="+primaryID+"&kind=credential", http.StatusOK)
+	encoded, _ = json.Marshal(relatedCredentialSearch)
+	if strings.Contains(string(encoded), "super-secret-value") || !strings.Contains(string(encoded), "svc_backup") {
+		t.Fatalf("credential relationship search redaction failed after merge: %s", encoded)
+	}
+}
+
 func postJSON(t *testing.T, url string, payload any, status int) map[string]any {
 	t.Helper()
 	body, _ := json.Marshal(payload)

@@ -225,6 +225,14 @@ func (v *Vault) UpdateRecord(id string, payload map[string]any) error {
 	return err
 }
 
+func (v *Vault) DeleteRecord(id string) error {
+	if _, err := v.DB.Exec(`DELETE FROM links WHERE src_id = ? OR dst_id = ?`, id, id); err != nil {
+		return err
+	}
+	_, err := v.DB.Exec(`DELETE FROM records WHERE id = ?`, id)
+	return err
+}
+
 func (v *Vault) Records(kind string) ([]Record, error) {
 	query := `SELECT id, kind, created_at, updated_at, payload FROM records`
 	args := []any{}

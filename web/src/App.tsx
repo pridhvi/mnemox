@@ -18,7 +18,7 @@ import {
 import { type DragEvent, type ElementType, type FormEvent, type ReactNode, useCallback, useEffect, useState } from 'react';
 import { api } from './api';
 import { defaultMetrics, metricLabels, metricOptions, metricOrder, metricsFromVector, vectorFromMetrics } from './cvss';
-import type { AssetDetail, AttackPath, FindingPayload, FindingRecord, RecordEnvelope, SearchHit } from './types';
+import type { AssetDetail, AssetDuplicateGroup, AssetDuplicateItem, AttackPath, FindingPayload, FindingRecord, RecordEnvelope, SearchHit } from './types';
 
 type Module = 'findings' | 'assets' | 'evidence' | 'notes' | 'credentials' | 'search' | 'paths' | 'packets' | 'settings';
 
@@ -678,16 +678,20 @@ function EvidenceModule() {
 
 function AssetsModule() {
   const [items, setItems] = useState<RecordEnvelope[]>([]);
+  const [duplicateGroups, setDuplicateGroups] = useState<AssetDuplicateGroup[]>([]);
   const [selectedId, setSelectedId] = useState('');
   const [detail, setDetail] = useState<AssetDetail | null>(null);
   const [form, setForm] = useState({ name: '', type: 'host', value: '', notes: '', tags: '' });
   const [importMessage, setImportMessage] = useState('');
   const [screenshotPath, setScreenshotPath] = useState('');
+  const [mergeTarget, setMergeTarget] = useState('');
+  const [mergeMessage, setMergeMessage] = useState('');
 
   async function load() {
-    const response = await api.assets();
-    setItems(response.items);
-    setSelectedId((current) => current || response.items[0]?.id || '');
+    const [assetResponse, duplicateResponse] = await Promise.all([api.assets(), api.assetDuplicates()]);
+    setItems(assetResponse.items);
+    setDuplicateGroups(duplicateResponse.items || []);
+    setSelectedId((current) => current || assetResponse.items[0]?.id || '');
   }
 
   useEffect(() => {
@@ -701,6 +705,9 @@ function AssetsModule() {
     }
     api.asset(selectedId).then(setDetail);
   }, [selectedId]);
+
+  const duplicateOptions = duplicateCandidatesForAsset(selectedId, duplicateGroups);
+  const selectedMergeTarget = duplicateOptions.find((item) => item.id === mergeTarget) || null;
 
   async function create(event: FormEvent) {
     event.preventDefault();
@@ -725,6 +732,20 @@ function AssetsModule() {
     setScreenshotPath('');
   }
 
+  async function mergeSelectedAsset() {
+    if (!selectedId || !mergeTarget || !detail || !selectedMergeTarget) return;
+    const ok = window.confirm(
+      `Merge ${assetLabel(selectedMergeTarget)} into ${assetLabel(detail)}?\n\n` +
+        `${selectedMergeTarget.relation_count || 0} linked records will move to the selected asset. This removes the duplicate asset record.`,
+    );
+    if (!ok) return;
+    const merged = await api.mergeAsset(selectedId, mergeTarget);
+    setDetail(merged);
+    setMergeTarget('');
+    setMergeMessage(`Merged ${assetLabel(selectedMergeTarget)} into ${assetLabel(merged)}.`);
+    await load();
+  }
+
   return (
     <section className="module-page two-column">
       <div>
@@ -745,6 +766,13 @@ function AssetsModule() {
                 <strong>{assetLabel(detail)}</strong>
                 <span>{String(detail.payload.type || 'asset')} · {String(detail.payload.value || '')}</span>
               </div>
+              {Array.isArray(detail.payload.aliases) && detail.payload.aliases.length > 0 && (
+                <div className="chip-list">
+                  {(detail.payload.aliases as string[]).map((alias) => (
+                    <span className="static-chip" key={alias}>{alias}</span>
+                  ))}
+                </div>
+              )}
               {detail.payload.notes ? <p className="muted">{String(detail.payload.notes)}</p> : null}
             </Panel>
             <RelationPanel title="Linked Findings" records={detail.findings || []} empty="No findings linked to this asset yet." />
@@ -782,6 +810,32 @@ function AssetsModule() {
           </label>
           <button onClick={importScreenshots}>Import screenshots</button>
           {importMessage && <p className="muted">{importMessage}</p>}
+        </div>
+        <div className="side-form">
+          <h2>Merge Duplicates</h2>
+          {detail && duplicateOptions.length > 0 ? (
+            <>
+              <select value={mergeTarget} onChange={(event) => setMergeTarget(event.target.value)}>
+                <option value="">Select duplicate candidate</option>
+                {duplicateOptions.map((candidate) => (
+                  <option key={candidate.id} value={candidate.id}>
+                    {assetLabel(candidate)} · {candidate.reason} · {candidate.relation_count || 0} links
+                  </option>
+                ))}
+              </select>
+              {selectedMergeTarget && (
+                <div className="merge-card">
+                  <strong>{assetLabel(selectedMergeTarget)}</strong>
+                  <span>{String(selectedMergeTarget.payload.type || 'asset')} · {String(selectedMergeTarget.payload.value || '')}</span>
+                  <small>{selectedMergeTarget.relation_count || 0} linked records will move to {assetLabel(detail)}.</small>
+                </div>
+              )}
+              <button className="danger" onClick={mergeSelectedAsset} disabled={!mergeTarget}>Merge into selected asset</button>
+            </>
+          ) : (
+            <p className="muted">No duplicate candidates for the selected asset.</p>
+          )}
+          {mergeMessage && <p className="muted">{mergeMessage}</p>}
         </div>
       </div>
     </section>
@@ -1237,6 +1291,19 @@ function listToCSV(values?: string[]) {
 
 function textToList(value: string) {
   return value.split(/\n|,/).map((item) => item.trim()).filter(Boolean);
+}
+
+function duplicateCandidatesForAsset(assetId: string, groups: AssetDuplicateGroup[]) {
+  const candidates = new Map<string, AssetDuplicateItem & { reason: string }>();
+  if (!assetId) return [];
+  groups.forEach((group) => {
+    if (!group.items.some((item) => item.id === assetId)) return;
+    group.items.forEach((item) => {
+      if (item.id === assetId || candidates.has(item.id)) return;
+      candidates.set(item.id, { ...item, reason: group.reason });
+    });
+  });
+  return Array.from(candidates.values()).sort((left, right) => assetLabel(left).localeCompare(assetLabel(right)));
 }
 
 function renderMarkdown(value: string) {
