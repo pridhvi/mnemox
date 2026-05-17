@@ -35,6 +35,13 @@ export const api = {
   scoreCvss: (id: string, payload: { vector?: string; metrics?: Record<string, string>; notes: string }) =>
     request(`/api/findings/${id}/cvss`, { method: 'POST', body: JSON.stringify(payload) }),
   packet: (id: string) => request<{ markdown: string }>(`/api/findings/${id}/packet`),
+  assets: () => request<{ items: RecordEnvelope[] }>('/api/assets'),
+  createAsset: (payload: { name: string; type: string; value: string; notes: string; tags: string[] }) =>
+    request<RecordEnvelope>('/api/assets', { method: 'POST', body: JSON.stringify(payload) }),
+  importNmap: (form: FormData) => request<{ assets: number; findings: number; evidence: number }>('/api/import/nmap', { method: 'POST', body: form }),
+  importNuclei: (form: FormData) => request<{ assets: number; findings: number; evidence: number }>('/api/import/nuclei', { method: 'POST', body: form }),
+  importScreenshots: (path: string) =>
+    request<{ assets: number; findings: number; evidence: number }>('/api/import/screenshots', { method: 'POST', body: JSON.stringify({ path }) }),
   evidence: () => request<{ items: RecordEnvelope[] }>('/api/evidence'),
   notes: () => request<{ items: RecordEnvelope[] }>('/api/notes'),
   credentials: () => request<{ items: RecordEnvelope[] }>('/api/credentials'),

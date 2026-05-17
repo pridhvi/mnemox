@@ -8,6 +8,8 @@ import (
 
 	"mnemox/internal/console"
 	"mnemox/internal/cvss"
+	"mnemox/internal/domain"
+	"mnemox/internal/importer"
 	"mnemox/internal/packet"
 	"mnemox/internal/vault"
 	"mnemox/internal/web"
@@ -32,7 +34,7 @@ func New() *App {
 		},
 	}
 	root.PersistentFlags().StringVar(&a.vaultPath, "vault", "", "path to vault directory, default .mnemox or MNEMOX_VAULT")
-	root.AddCommand(a.initCmd(), a.findingCmd(), a.noteCmd(), a.evidenceCmd(), a.credCmd(), a.askCmd(), a.cvssCmd(), a.packetCmd(), a.exportBlobCmd(), a.serveCmd())
+	root.AddCommand(a.initCmd(), a.findingCmd(), a.assetCmd(), a.noteCmd(), a.evidenceCmd(), a.credCmd(), a.importCmd(), a.askCmd(), a.cvssCmd(), a.packetCmd(), a.exportBlobCmd(), a.serveCmd())
 	a.root = root
 	return a
 }
@@ -139,6 +141,64 @@ func (a *App) findingCmd() *cobra.Command {
 	add.Flags().StringArrayVar(&scope, "affected-scope", nil, "affected asset/scope item")
 	add.Flags().StringArrayVar(&refs, "reference", nil, "reference URL or identifier")
 	cmd.AddCommand(add)
+	return cmd
+}
+
+func (a *App) assetCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "asset", Short: "Manage assets."}
+	var assetType, value, notes string
+	var tags []string
+	add := &cobra.Command{
+		Use:   "add <name>",
+		Short: "Add an asset.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			v, err := a.openVault()
+			if err != nil {
+				return err
+			}
+			defer v.Close()
+			if value == "" {
+				value = args[0]
+			}
+			id, err := v.AddRecord("asset", domain.AssetPayload(domain.Asset{
+				Name:  args[0],
+				Type:  assetType,
+				Value: value,
+				Tags:  tags,
+				Notes: notes,
+			}))
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Added asset %s: %s\n", id, args[0])
+			return nil
+		},
+	}
+	add.Flags().StringVar(&assetType, "type", "host", "asset type")
+	add.Flags().StringVar(&value, "value", "", "asset value")
+	add.Flags().StringVar(&notes, "notes", "", "asset notes")
+	add.Flags().StringArrayVar(&tags, "tag", nil, "tag")
+	list := &cobra.Command{
+		Use:   "list",
+		Short: "List assets.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			v, err := a.openVault()
+			if err != nil {
+				return err
+			}
+			defer v.Close()
+			records, err := v.Records("asset")
+			if err != nil {
+				return err
+			}
+			for _, rec := range records {
+				fmt.Printf("[%s] %s (%s) %s\n", shortID(rec.ID), rec.Payload["name"], rec.Payload["type"], rec.Payload["value"])
+			}
+			return nil
+		},
+	}
+	cmd.AddCommand(add, list)
 	return cmd
 }
 
@@ -268,6 +328,66 @@ func (a *App) credCmd() *cobra.Command {
 	add.Flags().StringVar(&scope, "scope", "", "credential scope")
 	add.Flags().StringArrayVar(&tags, "tag", nil, "tag")
 	cmd.AddCommand(add)
+	return cmd
+}
+
+func (a *App) importCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "import", Short: "Import tool output."}
+	nmap := &cobra.Command{
+		Use:   "nmap <xml-path>",
+		Short: "Import Nmap XML hosts and services as assets.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			v, err := a.openVault()
+			if err != nil {
+				return err
+			}
+			defer v.Close()
+			result, err := importer.NmapXML(v, args[0])
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Imported %d assets\n", result.Assets)
+			return nil
+		},
+	}
+	nuclei := &cobra.Command{
+		Use:   "nuclei <jsonl-path>",
+		Short: "Import nuclei JSONL findings and assets.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			v, err := a.openVault()
+			if err != nil {
+				return err
+			}
+			defer v.Close()
+			result, err := importer.NucleiJSON(v, args[0])
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Imported %d findings and %d assets\n", result.Findings, result.Assets)
+			return nil
+		},
+	}
+	screenshots := &cobra.Command{
+		Use:   "screenshots <folder>",
+		Short: "Import a folder of screenshots as evidence.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			v, err := a.openVault()
+			if err != nil {
+				return err
+			}
+			defer v.Close()
+			result, err := importer.ScreenshotFolder(v, args[0])
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Imported %d evidence items\n", result.Evidence)
+			return nil
+		},
+	}
+	cmd.AddCommand(nmap, nuclei, screenshots)
 	return cmd
 }
 

@@ -3,8 +3,8 @@ import {
   Clipboard,
   Download,
   FileText,
-  Fingerprint,
   GitBranch,
+  HardDrive,
   KeyRound,
   Lock,
   Plus,
@@ -20,10 +20,11 @@ import { api } from './api';
 import { defaultMetrics, metricLabels, metricOptions, metricOrder, metricsFromVector, vectorFromMetrics } from './cvss';
 import type { FindingPayload, FindingRecord, RecordEnvelope, SearchHit } from './types';
 
-type Module = 'findings' | 'evidence' | 'notes' | 'credentials' | 'search' | 'paths' | 'packets' | 'settings';
+type Module = 'findings' | 'assets' | 'evidence' | 'notes' | 'credentials' | 'search' | 'paths' | 'packets' | 'settings';
 
 const modules: Array<{ id: Module; label: string; icon: ElementType }> = [
   { id: 'findings', label: 'Findings', icon: FileText },
+  { id: 'assets', label: 'Assets', icon: HardDrive },
   { id: 'evidence', label: 'Evidence', icon: Upload },
   { id: 'notes', label: 'Notes', icon: StickyNote },
   { id: 'credentials', label: 'Credentials', icon: KeyRound },
@@ -104,6 +105,7 @@ export function App() {
       <main className="workspace">
         {error && <div className="notice error">{error}</div>}
         {active === 'findings' && <FindingWorkspace key={refreshKey} />}
+        {active === 'assets' && <AssetsModule />}
         {active === 'evidence' && <RecordTable title="Evidence" loader={api.evidence} />}
         {active === 'notes' && <RecordTable title="Notes" loader={api.notes} />}
         {active === 'credentials' && <CredentialsModule />}
@@ -413,6 +415,91 @@ function RecordTable({ title, loader }: { title: string; loader: () => Promise<{
             <small>{formatDate(item.updated_at)}</small>
           </div>
         ))}
+      </div>
+    </section>
+  );
+}
+
+function AssetsModule() {
+  const [items, setItems] = useState<RecordEnvelope[]>([]);
+  const [form, setForm] = useState({ name: '', type: 'host', value: '', notes: '', tags: '' });
+  const [importMessage, setImportMessage] = useState('');
+  const [screenshotPath, setScreenshotPath] = useState('');
+
+  async function load() {
+    const response = await api.assets();
+    setItems(response.items);
+  }
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  async function create(event: FormEvent) {
+    event.preventDefault();
+    await api.createAsset({ ...form, tags: textToList(form.tags) });
+    setForm({ name: '', type: 'host', value: '', notes: '', tags: '' });
+    await load();
+  }
+
+  async function importFile(kind: 'nmap' | 'nuclei', file: File | null) {
+    if (!file) return;
+    const data = new FormData();
+    data.append('file', file);
+    const result = kind === 'nmap' ? await api.importNmap(data) : await api.importNuclei(data);
+    setImportMessage(`Imported ${result.assets} assets, ${result.findings} findings, ${result.evidence} evidence items.`);
+    await load();
+  }
+
+  async function importScreenshots() {
+    const result = await api.importScreenshots(screenshotPath);
+    setImportMessage(`Imported ${result.evidence} screenshots.`);
+    setScreenshotPath('');
+  }
+
+  return (
+    <section className="module-page two-column">
+      <div>
+        <h1>Assets</h1>
+        <div className="table">
+          {items.map((item) => (
+            <div className="table-row" key={item.id}>
+              <strong>{String(item.payload.name)}</strong>
+              <span>{String(item.payload.type || 'asset')}</span>
+              <small>{String(item.payload.value || '')}</small>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="stack">
+        <form className="side-form" onSubmit={create}>
+          <h2>Add Asset</h2>
+          <input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="name" />
+          <select value={form.type} onChange={(event) => setForm({ ...form, type: event.target.value })}>
+            {['host', 'domain', 'url', 'user', 'cloud', 'repo', 'service', 'other'].map((option) => <option key={option}>{option}</option>)}
+          </select>
+          <input value={form.value} onChange={(event) => setForm({ ...form, value: event.target.value })} placeholder="value" />
+          <input value={form.tags} onChange={(event) => setForm({ ...form, tags: event.target.value })} placeholder="tags" />
+          <textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} placeholder="notes" />
+          <button className="primary">Save asset</button>
+        </form>
+        <div className="side-form">
+          <h2>Import Data</h2>
+          <label className="compact">
+            <span>Nmap XML</span>
+            <input type="file" accept=".xml,text/xml" onChange={(event) => importFile('nmap', event.target.files?.[0] || null)} />
+          </label>
+          <label className="compact">
+            <span>nuclei JSONL</span>
+            <input type="file" accept=".json,.jsonl,application/json" onChange={(event) => importFile('nuclei', event.target.files?.[0] || null)} />
+          </label>
+          <label className="compact">
+            <span>Screenshot Folder Path</span>
+            <input value={screenshotPath} onChange={(event) => setScreenshotPath(event.target.value)} placeholder="/path/to/screenshots" />
+          </label>
+          <button onClick={importScreenshots}>Import screenshots</button>
+          {importMessage && <p className="muted">{importMessage}</p>}
+        </div>
       </div>
     </section>
   );

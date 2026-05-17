@@ -7,9 +7,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
+
+	"mnemox/internal/search"
 
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
@@ -382,55 +383,41 @@ func (v *Vault) ReadBlob(id string) ([]byte, error) {
 }
 
 func (v *Vault) Search(query string, limit int) ([]SearchHit, error) {
-	terms := strings.Fields(strings.ToLower(query))
 	records, err := v.Records("")
 	if err != nil {
 		return nil, err
 	}
-	var hits []SearchHit
-	for _, rec := range records {
-		payload := rec.Payload
-		if rec.Kind == "credential" {
-			payload = clonePayloadWithoutSecret(rec.Payload)
-		}
-		data, _ := json.Marshal(payload)
-		haystack := strings.ToLower(string(data))
-		score := 0
-		for _, term := range terms {
-			score += strings.Count(haystack, term)
-		}
-		if score == 0 {
-			continue
-		}
-		hits = append(hits, SearchHit{
-			Kind:    rec.Kind,
-			ID:      rec.ID,
-			Title:   Title(rec.Payload),
-			Excerpt: excerpt(haystack, terms),
-			Score:   score,
-		})
-	}
-	sort.SliceStable(hits, func(i, j int) bool {
-		if hits[i].Score == hits[j].Score {
-			return hits[i].Title < hits[j].Title
-		}
-		return hits[i].Score > hits[j].Score
-	})
-	if limit > 0 && len(hits) > limit {
-		hits = hits[:limit]
-	}
-	return hits, nil
+	return convertSearchHits(search.Ranked(searchRecords(records), query, limit)), nil
 }
 
-func clonePayloadWithoutSecret(input map[string]any) map[string]any {
-	out := make(map[string]any, len(input))
-	for key, value := range input {
-		if key == "secret" {
-			continue
-		}
-		out[key] = value
+func (v *Vault) SearchByKind(query, kind string, limit int) ([]SearchHit, error) {
+	records, err := v.Records(kind)
+	if err != nil {
+		return nil, err
+	}
+	return convertSearchHits(search.Ranked(searchRecords(records), query, limit)), nil
+}
+
+func searchRecords(records []Record) []search.Record {
+	out := make([]search.Record, 0, len(records))
+	for _, record := range records {
+		out = append(out, search.Record{ID: record.ID, Kind: record.Kind, Payload: record.Payload})
 	}
 	return out
+}
+
+func convertSearchHits(ranked []search.Hit) []SearchHit {
+	hits := make([]SearchHit, 0, len(ranked))
+	for _, hit := range ranked {
+		hits = append(hits, SearchHit{
+			Kind:    hit.Kind,
+			ID:      hit.ID,
+			Title:   hit.Title,
+			Excerpt: hit.Excerpt,
+			Score:   hit.Score,
+		})
+	}
+	return hits
 }
 
 func Title(payload map[string]any) string {
@@ -444,22 +431,4 @@ func Title(payload map[string]any) string {
 
 func utcNow() string {
 	return time.Now().UTC().Truncate(time.Second).Format(time.RFC3339)
-}
-
-func excerpt(text string, terms []string) string {
-	start := 0
-	for _, term := range terms {
-		if idx := strings.Index(text, term); idx >= 0 {
-			start = idx - 60
-			if start < 0 {
-				start = 0
-			}
-			break
-		}
-	}
-	end := start + 180
-	if end > len(text) {
-		end = len(text)
-	}
-	return strings.ReplaceAll(text[start:end], `\n`, " ")
 }

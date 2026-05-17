@@ -34,6 +34,16 @@ func TestWebAPIWorkflowAndCredentialRedaction(t *testing.T) {
 		"affected_scope": []string{"ci.acme.local"},
 	}, http.StatusCreated)
 	findingID := finding["id"].(string)
+	postJSON(t, ts.URL+"/api/assets", map[string]any{
+		"name":  "ci.acme.local",
+		"type":  "host",
+		"value": "10.0.0.10",
+	}, http.StatusCreated)
+	assets := getJSON(t, ts.URL+"/api/assets", http.StatusOK)
+	if len(assets["items"].([]any)) != 1 {
+		t.Fatalf("expected asset list item: %#v", assets)
+	}
+	uploadImport(t, ts.URL+"/api/import/nmap", "nmap.xml", `<nmaprun><host><address addr="10.0.0.11"/><ports><port protocol="tcp" portid="80"><state state="open"/><service name="http"/></port></ports></host></nmaprun>`)
 
 	putJSON(t, ts.URL+"/api/findings/"+findingID, map[string]any{
 		"title":             "Jenkins anonymous read",
@@ -153,4 +163,27 @@ func uploadEvidence(t *testing.T, url string) {
 	}
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	doJSON(t, req, http.StatusCreated)
+}
+
+func uploadImport(t *testing.T, url, filename, content string) {
+	t.Helper()
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = part.Write([]byte(content))
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	req, err := http.NewRequest(http.MethodPost, url, &body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	response := doJSON(t, req, http.StatusOK)
+	if response["assets"].(float64) < 1 {
+		t.Fatalf("expected imported assets: %#v", response)
+	}
 }

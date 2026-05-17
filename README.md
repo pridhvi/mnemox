@@ -65,9 +65,13 @@ By default, Mnemox uses `.mnemox/` in the current directory. Set
 
 - `init`: create an encrypted local vault.
 - `finding add`: create a finding.
+- `asset add/list`: create and list assets.
 - `note`: add an operator note.
 - `evidence add`: encrypt and attach a file as evidence.
 - `cred add`: add an encrypted credential record.
+- `import nmap`: import Nmap XML hosts/services as assets.
+- `import nuclei`: import nuclei JSONL findings and assets.
+- `import screenshots`: import a folder of screenshots as evidence.
 - `ask`: local evidence recall over decrypted vault records.
 - `cvss score`: calculate and store a CVSS v4.0 Base score.
 - `packet build`: render a cited Markdown Finding Packet.
@@ -82,4 +86,12 @@ payloads and evidence blobs are encrypted with XChaCha20-Poly1305. Keep the
 passphrase safe; lost passphrases cannot be recovered.
 
 This MVP performs local keyword-style recall over decrypted records at runtime.
-It does not send data to an external AI service.
+It does not send data to an external AI service. Search uses local ranked
+matching over decrypted records at runtime, with credential secrets excluded
+from searchable material.
+
+## Backlog And Releases
+
+- Backlog: [docs/BACKLOG.md](docs/BACKLOG.md)
+- CI: `.github/workflows/ci.yml`
+- Release config: `.goreleaser.yaml`

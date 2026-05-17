@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"mnemox/internal/cvss"
+	"mnemox/internal/domain"
+	"mnemox/internal/importer"
 	"mnemox/internal/packet"
 	"mnemox/internal/vault"
 )
@@ -83,6 +85,11 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/findings/{id}/evidence", s.requireUnlock(s.handleUploadFindingEvidence))
 	mux.HandleFunc("POST /api/findings/{id}/cvss", s.requireUnlock(s.handleScoreFinding))
 	mux.HandleFunc("GET /api/findings/{id}/packet", s.requireUnlock(s.handleFindingPacket))
+	mux.HandleFunc("GET /api/assets", s.requireUnlock(s.handleListAssets))
+	mux.HandleFunc("POST /api/assets", s.requireUnlock(s.handleCreateAsset))
+	mux.HandleFunc("POST /api/import/nmap", s.requireUnlock(s.handleImportNmap))
+	mux.HandleFunc("POST /api/import/nuclei", s.requireUnlock(s.handleImportNuclei))
+	mux.HandleFunc("POST /api/import/screenshots", s.requireUnlock(s.handleImportScreenshots))
 	mux.HandleFunc("GET /api/evidence", s.requireUnlock(s.handleListEvidence))
 	mux.HandleFunc("GET /api/evidence/{id}/download", s.requireUnlock(s.handleDownloadEvidence))
 	mux.HandleFunc("GET /api/notes", s.requireUnlock(s.handleListNotes))
@@ -413,6 +420,100 @@ func (s *Server) handleFindingPacket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"markdown": markdown})
+}
+
+func (s *Server) handleListAssets(w http.ResponseWriter, r *http.Request) {
+	records, err := s.currentVault().Records("asset")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": recordList(records, false)})
+}
+
+func (s *Server) handleCreateAsset(w http.ResponseWriter, r *http.Request) {
+	var body map[string]any
+	if err := readJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	name := asString(body["name"])
+	if strings.TrimSpace(name) == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	value := asString(body["value"])
+	if value == "" {
+		value = name
+	}
+	id, err := s.currentVault().AddRecord("asset", domain.AssetPayload(domain.Asset{
+		Name:  name,
+		Type:  asString(body["type"]),
+		Value: value,
+		Tags:  asStringSlice(body["tags"]),
+		Notes: asString(body["notes"]),
+	}))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	rec, _ := s.currentVault().GetRecord(id)
+	writeJSON(w, http.StatusCreated, recordResponse(rec))
+}
+
+func (s *Server) handleImportNmap(w http.ResponseWriter, r *http.Request) {
+	s.handleImportFile(w, r, importer.NmapXML)
+}
+
+func (s *Server) handleImportNuclei(w http.ResponseWriter, r *http.Request) {
+	s.handleImportFile(w, r, importer.NucleiJSON)
+}
+
+func (s *Server) handleImportScreenshots(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Path string `json:"path"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	result, err := importer.ScreenshotFolder(s.currentVault(), body.Path)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) handleImportFile(w http.ResponseWriter, r *http.Request, fn func(*vault.Vault, string) (importer.Result, error)) {
+	if err := r.ParseMultipartForm(64 << 20); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "file is required")
+		return
+	}
+	defer file.Close()
+	temp, err := os.CreateTemp("", "mnemox-import-*"+filepath.Ext(header.Filename))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer os.Remove(temp.Name())
+	if _, err := io.Copy(temp, file); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		_ = temp.Close()
+		return
+	}
+	_ = temp.Close()
+	result, err := fn(s.currentVault(), temp.Name())
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) handleListEvidence(w http.ResponseWriter, r *http.Request) {
