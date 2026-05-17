@@ -1,0 +1,9 @@
+.mnemox/
+.venv/
+bin/
+dist/
+*.db
+*.test
+.DS_Store
+*.tsbuildinfo
+web/node_modules/
