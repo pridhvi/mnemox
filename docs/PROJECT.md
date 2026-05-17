@@ -75,8 +75,8 @@ The primary workflow is the local web UI started with `mnemox serve`. The CLI an
 ### Attack Paths
 
 - Relationship data exists through asset links.
-- The web UI shows a simple asset-centered linked-chain view across findings, evidence, notes, and redacted credentials.
-- Graph visualization is a later layer.
+- The web UI shows risk hubs, completeness checks, a selected-asset visual map, chain builder controls, and copy-ready attack path Markdown.
+- Credential context stays redacted in graph, inspector, and packet output.
 
 ### Imports
 
@@ -89,5 +89,4 @@ The primary workflow is the local web UI started with `mnemox serve`. The CLI an
 
 ## Near-Term Roadmap Order
 
-1. Attack path graph visualization.
-2. Release polish: signed artifacts, Homebrew tap, docs site.
+1. Release polish: signed artifacts, Homebrew tap, docs site.

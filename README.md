@@ -3,6 +3,8 @@
 Mnemox is a local-first memory system for pentest engagements. It stores
 findings, notes, evidence, credentials, assets, and CVSS v4.0 Base scores in an
 encrypted local vault, then renders copy-paste-ready Markdown Finding Packets.
+The web UI also includes an Attack Paths workspace for connected asset risk,
+context completeness checks, and copy-ready attack path Markdown.
 
 ## Install
 

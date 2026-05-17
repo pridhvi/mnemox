@@ -45,7 +45,7 @@ This is the canonical implementation backlog. Keep it synchronized with code cha
 - [x] Packet filtering by linked asset.
 - [ ] Search filters by tag and finding status.
 - [x] Attack Paths linked-chain view.
-- [ ] Attack Paths graph visualization.
+- [x] Attack Paths workspace with risk hubs, visual map, chain packet, and completeness checks.
 - [x] Evidence citation bundles for AI prompts.
 - [x] Local embedding index with encrypted cache.
 

@@ -198,6 +198,18 @@ func TestWebAPIWorkflowAndCredentialRedaction(t *testing.T) {
 	if len(firstPath["findings"].([]any)) != 1 || len(firstPath["evidence"].([]any)) != 1 || len(firstPath["notes"].([]any)) != 1 || len(firstPath["credentials"].([]any)) != 1 {
 		t.Fatalf("expected complete attack path chain: %#v", firstPath)
 	}
+	if firstPath["risk_score"].(float64) <= 0 || len(firstPath["checks"].([]any)) == 0 {
+		t.Fatalf("expected attack path workspace metadata: %#v", firstPath)
+	}
+	packetMarkdown := firstPath["packet_markdown"].(string)
+	for _, expected := range []string{"# Attack Path: ci.acme.local", "Jenkins anonymous read", "Updated dashboard proof", "Credential Context"} {
+		if !strings.Contains(packetMarkdown, expected) {
+			t.Fatalf("attack path packet missing %q: %s", expected, packetMarkdown)
+		}
+	}
+	if strings.Contains(packetMarkdown, "super-secret-value") {
+		t.Fatalf("attack path packet leaked credential secret: %s", packetMarkdown)
+	}
 }
 
 func TestAssetMergeMovesRelationsAndRedactsCredentialContext(t *testing.T) {

@@ -824,6 +824,244 @@ label.compact textarea {
   font-size: 12px;
 }
 
+.attack-workspace {
+  align-content: start;
+}
+
+.workspace-head,
+.section-head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.workspace-head div,
+.section-head {
+  min-width: 0;
+}
+
+.risk-pill {
+  border: 1px solid rgba(88, 214, 141, 0.45);
+  border-radius: 7px;
+  background: rgba(88, 214, 141, 0.12);
+  color: var(--accent);
+  padding: 7px 10px;
+  white-space: nowrap;
+}
+
+.attack-layout {
+  display: grid;
+  grid-template-columns: 260px minmax(460px, 1fr) 360px;
+  gap: 14px;
+  align-items: start;
+}
+
+.risk-hubs,
+.chain-workbench,
+.path-inspector,
+.path-map,
+.chain-builder {
+  display: grid;
+  gap: 12px;
+}
+
+.risk-hubs,
+.path-map,
+.chain-builder {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(16, 22, 29, 0.76);
+  padding: 14px;
+}
+
+.risk-hub {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 10px;
+  min-height: auto;
+  justify-content: stretch;
+  text-align: left;
+  padding: 11px;
+  background: rgba(9, 13, 18, 0.45);
+}
+
+.risk-hub.selected {
+  border-color: var(--accent-2);
+  background: rgba(83, 167, 255, 0.12);
+}
+
+.risk-hub strong,
+.risk-hub span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.risk-hub span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.risk-hub b {
+  color: var(--accent);
+  grid-row: 1 / span 2;
+  grid-column: 2;
+}
+
+.path-map svg {
+  width: 100%;
+  min-height: 320px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #090d12;
+}
+
+.map-edge {
+  stroke: var(--line-strong);
+  stroke-width: 1.4;
+}
+
+.map-edge.finding {
+  stroke: rgba(255, 107, 107, 0.7);
+}
+
+.map-edge.evidence {
+  stroke: rgba(88, 214, 141, 0.65);
+}
+
+.map-edge.note {
+  stroke: rgba(246, 201, 107, 0.65);
+}
+
+.map-edge.credential {
+  stroke: rgba(185, 140, 255, 0.65);
+}
+
+.map-node {
+  cursor: pointer;
+  outline: none;
+}
+
+.map-node rect {
+  fill: #10161d;
+  stroke: var(--line-strong);
+  stroke-width: 1.4;
+}
+
+.map-node.asset rect {
+  stroke: var(--accent-2);
+}
+
+.map-node.finding rect {
+  stroke: var(--danger);
+}
+
+.map-node.evidence rect {
+  stroke: var(--accent);
+}
+
+.map-node.note rect {
+  stroke: var(--warning);
+}
+
+.map-node.credential rect {
+  stroke: #b98cff;
+}
+
+.map-node.selected rect {
+  stroke-width: 2.8;
+  filter: drop-shadow(0 0 8px rgba(83, 167, 255, 0.38));
+}
+
+.map-node text {
+  fill: var(--text);
+  font-size: 14px;
+  font-weight: 700;
+  text-anchor: middle;
+  pointer-events: none;
+}
+
+.map-node .node-subtitle {
+  fill: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.chain-groups {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.chain-group {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgba(9, 13, 18, 0.55);
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+
+.chain-group h3 {
+  margin: 0;
+  font-size: 12px;
+  color: #c7d2df;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.chain-item {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: start;
+  gap: 8px;
+}
+
+.chain-item input {
+  width: 16px;
+  min-height: 16px;
+  margin-top: 8px;
+}
+
+.chain-item button {
+  display: grid;
+  gap: 3px;
+  min-height: auto;
+  padding: 8px;
+  justify-content: stretch;
+  text-align: left;
+  background: transparent;
+}
+
+.chain-item strong,
+.chain-item small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.check-list {
+  display: grid;
+  gap: 7px;
+}
+
+.check-list span {
+  border: 1px solid rgba(246, 201, 107, 0.35);
+  border-radius: 7px;
+  background: rgba(246, 201, 107, 0.1);
+  color: #ffe2a1;
+  padding: 8px;
+  font-size: 12px;
+}
+
+.check-list span.ready {
+  border-color: rgba(88, 214, 141, 0.45);
+  background: rgba(88, 214, 141, 0.1);
+  color: #bff2d0;
+}
+
 .path-grid {
   display: grid;
   gap: 14px;
@@ -936,6 +1174,15 @@ label.compact textarea {
     grid-template-columns: 280px 1fr;
   }
 
+  .attack-layout {
+    grid-template-columns: 240px 1fr;
+  }
+
+  .path-inspector {
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .detail-pane {
     grid-column: 1 / -1;
     max-height: none;
@@ -966,6 +1213,9 @@ label.compact textarea {
   .detail-pane,
   .form-grid,
   .filter-row,
+  .attack-layout,
+  .path-inspector,
+  .chain-groups,
   .path-columns {
     grid-template-columns: 1fr;
   }

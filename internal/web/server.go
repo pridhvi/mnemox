@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -990,14 +991,25 @@ func (s *Server) handleAttackPaths(w http.ResponseWriter, r *http.Request) {
 		if len(findings)+len(evidence)+len(notes)+len(credentials) == 0 {
 			continue
 		}
+		checks := attackPathChecks(v, asset, findings, evidence, notes, credentials)
 		item := recordResponse(asset)
 		item["findings"] = recordList(findings, false)
 		item["evidence"] = recordList(evidence, false)
 		item["notes"] = recordList(notes, false)
 		item["credentials"] = recordList(credentials, true)
 		item["risk_score"] = attackPathRisk(findings, evidence, credentials)
+		item["checks"] = checks
+		item["packet_markdown"] = attackPathPacket(asset, findings, evidence, notes, credentials, checks)
 		items = append(items, item)
 	}
+	sort.SliceStable(items, func(i, j int) bool {
+		left, _ := items[i]["risk_score"].(int)
+		right, _ := items[j]["risk_score"].(int)
+		if left == right {
+			return asString(items[i]["id"]) < asString(items[j]["id"])
+		}
+		return left > right
+	})
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
@@ -1365,6 +1377,82 @@ func attackPathRisk(findings, evidence, credentials []vault.Record) int {
 		}
 	}
 	return score
+}
+
+func attackPathChecks(v *vault.Vault, asset vault.Record, findings, evidence, notes, credentials []vault.Record) []string {
+	var checks []string
+	if len(findings) == 0 {
+		checks = append(checks, "No findings linked to "+vault.Title(asset.Payload)+".")
+	}
+	if len(evidence) == 0 {
+		checks = append(checks, "No evidence linked to "+vault.Title(asset.Payload)+".")
+	}
+	for _, finding := range findings {
+		linkedEvidence, _ := v.Linked(finding.ID, "has_evidence")
+		if len(linkedEvidence) == 0 {
+			checks = append(checks, "Finding has no direct evidence: "+vault.Title(finding.Payload)+".")
+		}
+		if strings.EqualFold(asString(finding.Payload["severity"]), "Critical") || strings.EqualFold(asString(finding.Payload["severity"]), "High") {
+			if len(linkedEvidence) == 0 {
+				checks = append(checks, "High-impact finding needs evidence before reporting: "+vault.Title(finding.Payload)+".")
+			}
+		}
+	}
+	for _, item := range evidence {
+		if strings.TrimSpace(asString(item.Payload["caption"])) == "" {
+			checks = append(checks, "Evidence is missing a caption: "+vault.Title(item.Payload)+".")
+		}
+	}
+	if len(credentials) > 0 && len(findings) == 0 {
+		checks = append(checks, "Credential context exists without a linked finding.")
+	}
+	if len(checks) == 0 {
+		checks = append(checks, "Linked context is ready for an attack path packet.")
+	}
+	return checks
+}
+
+func attackPathPacket(asset vault.Record, findings, evidence, notes, credentials []vault.Record, checks []string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "# Attack Path: %s\n\n", vault.Title(asset.Payload))
+	fmt.Fprintf(&b, "## Asset\n\n- Name: %s\n- Type: %s\n- Value: %s\n- Risk Score: %d\n\n",
+		vault.Title(asset.Payload),
+		defaultString(asString(asset.Payload["type"]), "asset"),
+		asString(asset.Payload["value"]),
+		attackPathRisk(findings, evidence, credentials),
+	)
+	writeAttackPathRecords(&b, "Findings", findings)
+	writeAttackPathRecords(&b, "Evidence", evidence)
+	writeAttackPathRecords(&b, "Notes", notes)
+	writeAttackPathRecords(&b, "Credential Context", credentials)
+	b.WriteString("## Completeness Checks\n\n")
+	for _, check := range checks {
+		fmt.Fprintf(&b, "- %s\n", check)
+	}
+	return strings.TrimSpace(b.String()) + "\n"
+}
+
+func writeAttackPathRecords(b *strings.Builder, title string, records []vault.Record) {
+	fmt.Fprintf(b, "## %s\n\n", title)
+	if len(records) == 0 {
+		b.WriteString("- None\n\n")
+		return
+	}
+	for _, rec := range records {
+		fmt.Fprintf(b, "- [%s:%s] %s", rec.Kind, shortRecordID(rec.ID), vault.Title(rec.Payload))
+		if summary := relationshipExcerpt(rec); summary != "" {
+			fmt.Fprintf(b, " - %s", redactSecretFragments(summary))
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
+}
+
+func shortRecordID(id string) string {
+	if len(id) <= 8 {
+		return id
+	}
+	return id[:8]
 }
 
 func relationshipExcerpt(rec vault.Record) string {

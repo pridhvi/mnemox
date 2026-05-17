@@ -57,6 +57,8 @@ export type AssetDuplicateGroup = {
 
 export type AttackPath = AssetDetail & {
   risk_score: number;
+  checks?: string[];
+  packet_markdown?: string;
 };
 
 export type SearchHit = {

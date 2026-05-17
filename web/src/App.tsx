@@ -15,7 +15,7 @@ import {
   StickyNote,
   Upload,
 } from 'lucide-react';
-import { type DragEvent, type ElementType, type FormEvent, type ReactNode, useCallback, useEffect, useState } from 'react';
+import { type DragEvent, type ElementType, type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from './api';
 import { defaultMetrics, metricLabels, metricOptions, metricOrder, metricsFromVector, vectorFromMetrics } from './cvss';
 import type { AssetDetail, AssetDuplicateGroup, AssetDuplicateItem, AttackPath, FindingPayload, FindingRecord, RecordEnvelope, SearchHit } from './types';
@@ -1025,41 +1025,177 @@ function SearchModule() {
 
 function AttackPathsModule() {
   const [items, setItems] = useState<AttackPath[]>([]);
+  const [selectedId, setSelectedId] = useState('');
+  const [selectedRecordId, setSelectedRecordId] = useState('');
+  const [included, setIncluded] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
-    api.attackPaths().then((response) => setItems(response.items));
+    api.attackPaths().then((response) => {
+      setItems(response.items);
+      setSelectedId((current) => current || response.items[0]?.id || '');
+    });
   }, []);
 
+  const selected = useMemo(() => items.find((item) => item.id === selectedId) || items[0] || null, [items, selectedId]);
+  const related = useMemo(() => (selected ? attackPathRecords(selected) : []), [selected]);
+  const activeRecord = useMemo(() => {
+    if (!selected) return null;
+    if (selectedRecordId === selected.id) return selected;
+    return related.find((record) => record.id === selectedRecordId) || selected;
+  }, [related, selected, selectedRecordId]);
+  const packetMarkdown = useMemo(() => (selected ? buildAttackPathMarkdown(selected, included) : ''), [included, selected]);
+  const downloadHref = packetMarkdown ? `data:text/markdown;charset=utf-8,${encodeURIComponent(packetMarkdown)}` : '';
+
+  useEffect(() => {
+    if (!selected) return;
+    setSelectedRecordId(selected.id);
+    setIncluded(Object.fromEntries(attackPathRecords(selected).map((record) => [record.id, true])));
+  }, [selected?.id]);
+
+  function toggleRecord(id: string) {
+    setIncluded((current) => ({ ...current, [id]: !current[id] }));
+  }
+
   return (
-    <section className="module-page">
-      <h1>Attack Paths</h1>
+    <section className="module-page attack-workspace">
+      <div className="workspace-head">
+        <div>
+          <h1>Attack Paths</h1>
+          <p className="muted">Risk hubs, linked context, completeness checks, and copy-ready chain packets.</p>
+        </div>
+        {selected && <b className="risk-pill">Risk {selected.risk_score}</b>}
+      </div>
       {items.length === 0 ? (
         <div className="empty-panel">
           <GitBranch size={28} />
           <p>No linked asset chains yet.</p>
         </div>
       ) : (
-        <div className="path-grid">
-          {items.map((path) => (
-            <section className="path-card" key={path.id}>
-              <div className="path-header">
+        <>
+          <div className="attack-layout">
+            <aside className="risk-hubs">
+              <h2>Risk Hubs</h2>
+              {items.map((path) => (
+                <button className={`risk-hub ${selected?.id === path.id ? 'selected' : ''}`} key={path.id} onClick={() => setSelectedId(path.id)}>
+                  <strong>{assetLabel(path)}</strong>
+                  <span>{attackPathRecords(path).length} linked records</span>
+                  <b>Risk {path.risk_score}</b>
+                </button>
+              ))}
+            </aside>
+            {selected && (
+              <main className="chain-workbench">
+                <AttackPathMap path={selected} included={included} selectedId={activeRecord?.id || selected.id} onSelect={setSelectedRecordId} />
+                <section className="chain-builder">
+                  <div className="section-head">
+                    <h2>Chain Builder</h2>
+                    <span>{related.filter((record) => included[record.id]).length} selected</span>
+                  </div>
+                  <div className="chain-groups">
+                    <ChainGroup title="Findings" records={selected.findings || []} included={included} onToggle={toggleRecord} onSelect={setSelectedRecordId} />
+                    <ChainGroup title="Evidence" records={selected.evidence || []} included={included} onToggle={toggleRecord} onSelect={setSelectedRecordId} />
+                    <ChainGroup title="Notes" records={selected.notes || []} included={included} onToggle={toggleRecord} onSelect={setSelectedRecordId} />
+                    <ChainGroup title="Credentials" records={selected.credentials || []} included={included} onToggle={toggleRecord} onSelect={setSelectedRecordId} />
+                  </div>
+                </section>
+              </main>
+            )}
+            <aside className="path-inspector">
+              {selected && activeRecord ? (
+                <>
+                  <Panel title="Inspector">
+                    <div className="record-head">
+                      <strong>{recordTitle(activeRecord)}</strong>
+                      <span>{activeRecord.kind} · {activeRecord.id.slice(0, 8)}</span>
+                    </div>
+                    <p className="muted">{relationSummary(activeRecord) || 'No summary yet.'}</p>
+                  </Panel>
+                  <Panel title="Completeness Checks">
+                    <div className="check-list">
+                      {(selected.checks || []).map((check) => (
+                        <span key={check} className={check.includes('ready') ? 'ready' : ''}>{check}</span>
+                      ))}
+                    </div>
+                  </Panel>
+                  <Panel title="Attack Path Packet">
+                    <div className="packet-actions">
+                      <button onClick={() => navigator.clipboard.writeText(packetMarkdown)}><Clipboard size={15} /> Copy Markdown</button>
+                      <a className="button-link" href={downloadHref} download={`${assetLabel(selected)}-attack-path.md`}><Download size={15} /> Download</a>
+                    </div>
+                    <pre className="packet-preview">{packetMarkdown}</pre>
+                  </Panel>
+                </>
+              ) : null}
+            </aside>
+          </div>
+          <div className="path-grid">
+            {items.map((path) => (
+              <section className="path-card" key={path.id}>
+                <div className="path-header">
                 <div>
                   <strong>{assetLabel(path)}</strong>
                   <span>{String(path.payload.type || 'asset')} · {String(path.payload.value || '')}</span>
                 </div>
                 <b>Risk {path.risk_score}</b>
-              </div>
-              <div className="path-columns">
-                <PathColumn title="Findings" records={path.findings || []} />
-                <PathColumn title="Evidence" records={path.evidence || []} />
-                <PathColumn title="Notes" records={path.notes || []} />
-                <PathColumn title="Credentials" records={path.credentials || []} />
-              </div>
-            </section>
-          ))}
-        </div>
+                </div>
+                <div className="path-columns">
+                  <PathColumn title="Findings" records={path.findings || []} />
+                  <PathColumn title="Evidence" records={path.evidence || []} />
+                  <PathColumn title="Notes" records={path.notes || []} />
+                  <PathColumn title="Credentials" records={path.credentials || []} />
+                </div>
+              </section>
+            ))}
+          </div>
+        </>
       )}
     </section>
+  );
+}
+
+function AttackPathMap({ path, included, selectedId, onSelect }: { path: AttackPath; included: Record<string, boolean>; selectedId: string; onSelect: (id: string) => void }) {
+  const nodes = attackPathMapNodes(path, included);
+  const assetNode = nodes.find((node) => node.record.id === path.id);
+  return (
+    <section className="path-map">
+      <div className="section-head">
+        <h2>Visual Map</h2>
+        <span>{assetLabel(path)}</span>
+      </div>
+      <svg viewBox="0 0 620 300" role="img" aria-label={`Attack path map for ${assetLabel(path)}`}>
+        {assetNode && nodes.filter((node) => node.record.id !== path.id).map((node) => (
+          <line key={`${node.record.id}-edge`} x1={assetNode.x} y1={assetNode.y} x2={node.x} y2={node.y} className={`map-edge ${node.kind}`} />
+        ))}
+        {nodes.map((node) => (
+          <g key={node.record.id} className={`map-node ${node.kind} ${selectedId === node.record.id ? 'selected' : ''}`} onClick={() => onSelect(node.record.id)} tabIndex={0} role="button" aria-label={recordTitle(node.record)}>
+            <rect x={node.x - 78} y={node.y - 27} width="156" height="54" rx="7" />
+            <text x={node.x} y={node.y - 5}>{truncate(recordTitle(node.record), 22)}</text>
+            <text x={node.x} y={node.y + 15} className="node-subtitle">{node.kind}</text>
+          </g>
+        ))}
+      </svg>
+    </section>
+  );
+}
+
+function ChainGroup({ title, records, included, onToggle, onSelect }: { title: string; records: RecordEnvelope[]; included: Record<string, boolean>; onToggle: (id: string) => void; onSelect: (id: string) => void }) {
+  return (
+    <div className="chain-group">
+      <h3>{title}</h3>
+      {records.length === 0 ? (
+        <span className="muted">None</span>
+      ) : (
+        records.map((record) => (
+          <div key={record.id} className="chain-item">
+            <input type="checkbox" checked={included[record.id] !== false} onChange={() => onToggle(record.id)} />
+            <button type="button" onClick={() => onSelect(record.id)}>
+              <strong>{recordTitle(record)}</strong>
+              <small>{relationSummary(record) || record.kind}</small>
+            </button>
+          </div>
+        ))
+      )}
+    </div>
   );
 }
 
@@ -1265,6 +1401,71 @@ function AssetLinkEditor({
       </div>
     </>
   );
+}
+
+function attackPathRecords(path: AttackPath) {
+  return [...(path.findings || []), ...(path.evidence || []), ...(path.notes || []), ...(path.credentials || [])];
+}
+
+function attackPathMapNodes(path: AttackPath, included: Record<string, boolean>) {
+  const linked = attackPathRecords(path).filter((record) => included[record.id] !== false);
+  const findings = linked.filter((record) => record.kind === 'finding');
+  const evidence = linked.filter((record) => record.kind === 'evidence');
+  const notes = linked.filter((record) => record.kind === 'note');
+  const credentials = linked.filter((record) => record.kind === 'credential');
+  return [
+    { record: path, kind: 'asset', x: 310, y: 150 },
+    ...spreadNodes(findings, 'finding', 110, 150),
+    ...spreadNodes(evidence, 'evidence', 510, 75),
+    ...spreadNodes(notes, 'note', 510, 150),
+    ...spreadNodes(credentials, 'credential', 510, 225),
+  ];
+}
+
+function spreadNodes(records: RecordEnvelope[], kind: string, x: number, centerY: number) {
+  const gap = records.length > 2 ? 58 : 70;
+  const start = centerY - ((records.length - 1) * gap) / 2;
+  return records.map((record, index) => ({ record, kind, x, y: start + index * gap }));
+}
+
+export function buildAttackPathMarkdown(path: AttackPath, included: Record<string, boolean>) {
+  const sections: Array<[string, RecordEnvelope[]]> = [
+    ['Findings', path.findings || []],
+    ['Evidence', path.evidence || []],
+    ['Notes', path.notes || []],
+    ['Credential Context', path.credentials || []],
+  ];
+  const lines = [
+    `# Attack Path: ${assetLabel(path)}`,
+    '',
+    '## Asset',
+    '',
+    `- Name: ${assetLabel(path)}`,
+    `- Type: ${String(path.payload.type || 'asset')}`,
+    `- Value: ${String(path.payload.value || '')}`,
+    `- Risk Score: ${path.risk_score}`,
+    '',
+  ];
+  sections.forEach(([title, records]) => {
+    lines.push(`## ${title}`, '');
+    const selected = records.filter((record) => included[record.id] !== false);
+    if (selected.length === 0) {
+      lines.push('- None', '');
+      return;
+    }
+    selected.forEach((record) => {
+      const summary = relationSummary(record);
+      lines.push(`- [${record.kind}:${record.id.slice(0, 8)}] ${recordTitle(record)}${summary ? ` - ${summary}` : ''}`);
+    });
+    lines.push('');
+  });
+  lines.push('## Completeness Checks', '');
+  (path.checks || []).forEach((check) => lines.push(`- ${check}`));
+  return `${lines.join('\n').trim()}\n`;
+}
+
+function truncate(value: string, limit: number) {
+  return value.length > limit ? `${value.slice(0, limit - 1)}...` : value;
 }
 
 function PathColumn({ title, records }: { title: string; records: RecordEnvelope[] }) {
