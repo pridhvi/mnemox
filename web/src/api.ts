@@ -1,5 +1,7 @@
 import type { AssetDetail, AssetDuplicateGroup, AttackPath, FindingPayload, FindingRecord, RecordEnvelope, SearchHit } from './types';
 
+export type ImportResult = { assets: number; findings: number; evidence: number; notes?: number };
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(path, {
     ...options,
@@ -47,10 +49,13 @@ export const api = {
     request<AssetDetail>(`/api/assets/${id}/merge`, { method: 'POST', body: JSON.stringify({ duplicate_id: duplicateId }) }),
   createAsset: (payload: { name: string; type: string; value: string; notes: string; tags: string[] }) =>
     request<RecordEnvelope>('/api/assets', { method: 'POST', body: JSON.stringify(payload) }),
-  importNmap: (form: FormData) => request<{ assets: number; findings: number; evidence: number }>('/api/import/nmap', { method: 'POST', body: form }),
-  importNuclei: (form: FormData) => request<{ assets: number; findings: number; evidence: number }>('/api/import/nuclei', { method: 'POST', body: form }),
+  importNmap: (form: FormData) => request<ImportResult>('/api/import/nmap', { method: 'POST', body: form }),
+  importNuclei: (form: FormData) => request<ImportResult>('/api/import/nuclei', { method: 'POST', body: form }),
+  importBurp: (form: FormData) => request<ImportResult>('/api/import/burp', { method: 'POST', body: form }),
+  importNessus: (form: FormData) => request<ImportResult>('/api/import/nessus', { method: 'POST', body: form }),
+  importBloodHound: (form: FormData) => request<ImportResult>('/api/import/bloodhound', { method: 'POST', body: form }),
   importScreenshots: (path: string) =>
-    request<{ assets: number; findings: number; evidence: number }>('/api/import/screenshots', { method: 'POST', body: JSON.stringify({ path }) }),
+    request<ImportResult>('/api/import/screenshots', { method: 'POST', body: JSON.stringify({ path }) }),
   evidence: () => request<{ items: RecordEnvelope[] }>('/api/evidence'),
   updateEvidence: (id: string, payload: { kind: string; caption: string; original_path: string; tags: string[] }) =>
     request<RecordEnvelope>(`/api/evidence/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),

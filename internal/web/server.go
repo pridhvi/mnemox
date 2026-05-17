@@ -94,6 +94,9 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/assets/{id}/merge", s.requireUnlock(s.handleMergeAsset))
 	mux.HandleFunc("POST /api/import/nmap", s.requireUnlock(s.handleImportNmap))
 	mux.HandleFunc("POST /api/import/nuclei", s.requireUnlock(s.handleImportNuclei))
+	mux.HandleFunc("POST /api/import/burp", s.requireUnlock(s.handleImportBurp))
+	mux.HandleFunc("POST /api/import/nessus", s.requireUnlock(s.handleImportNessus))
+	mux.HandleFunc("POST /api/import/bloodhound", s.requireUnlock(s.handleImportBloodHound))
 	mux.HandleFunc("POST /api/import/screenshots", s.requireUnlock(s.handleImportScreenshots))
 	mux.HandleFunc("GET /api/evidence", s.requireUnlock(s.handleListEvidence))
 	mux.HandleFunc("PUT /api/evidence/{id}", s.requireUnlock(s.handleUpdateEvidence))
@@ -567,6 +570,18 @@ func (s *Server) handleImportNmap(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleImportNuclei(w http.ResponseWriter, r *http.Request) {
 	s.handleImportFile(w, r, importer.NucleiJSON)
+}
+
+func (s *Server) handleImportBurp(w http.ResponseWriter, r *http.Request) {
+	s.handleImportFile(w, r, importer.BurpXML)
+}
+
+func (s *Server) handleImportNessus(w http.ResponseWriter, r *http.Request) {
+	s.handleImportFile(w, r, importer.NessusXML)
+}
+
+func (s *Server) handleImportBloodHound(w http.ResponseWriter, r *http.Request) {
+	s.handleImportFile(w, r, importer.BloodHoundJSON)
 }
 
 func (s *Server) handleImportScreenshots(w http.ResponseWriter, r *http.Request) {

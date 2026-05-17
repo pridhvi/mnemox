@@ -717,18 +717,25 @@ function AssetsModule() {
     await load();
   }
 
-  async function importFile(kind: 'nmap' | 'nuclei', file: File | null) {
+  async function importFile(kind: 'nmap' | 'nuclei' | 'burp' | 'nessus' | 'bloodhound', file: File | null) {
     if (!file) return;
     const data = new FormData();
     data.append('file', file);
-    const result = kind === 'nmap' ? await api.importNmap(data) : await api.importNuclei(data);
-    setImportMessage(`Imported ${result.assets} assets, ${result.findings} findings, ${result.evidence} evidence items.`);
+    const importers = {
+      nmap: api.importNmap,
+      nuclei: api.importNuclei,
+      burp: api.importBurp,
+      nessus: api.importNessus,
+      bloodhound: api.importBloodHound,
+    };
+    const result = await importers[kind](data);
+    setImportMessage(importSummary(result));
     await load();
   }
 
   async function importScreenshots() {
     const result = await api.importScreenshots(screenshotPath);
-    setImportMessage(`Imported ${result.evidence} screenshots.`);
+    setImportMessage(importSummary(result));
     setScreenshotPath('');
   }
 
@@ -803,6 +810,18 @@ function AssetsModule() {
           <label className="compact">
             <span>nuclei JSONL</span>
             <input type="file" accept=".json,.jsonl,application/json" onChange={(event) => importFile('nuclei', event.target.files?.[0] || null)} />
+          </label>
+          <label className="compact">
+            <span>Burp XML</span>
+            <input type="file" accept=".xml,text/xml,application/xml" onChange={(event) => importFile('burp', event.target.files?.[0] || null)} />
+          </label>
+          <label className="compact">
+            <span>Nessus</span>
+            <input type="file" accept=".nessus,.xml,text/xml,application/xml" onChange={(event) => importFile('nessus', event.target.files?.[0] || null)} />
+          </label>
+          <label className="compact">
+            <span>BloodHound JSON</span>
+            <input type="file" accept=".json,application/json" onChange={(event) => importFile('bloodhound', event.target.files?.[0] || null)} />
           </label>
           <label className="compact">
             <span>Screenshot Folder Path</span>
@@ -1291,6 +1310,16 @@ function listToCSV(values?: string[]) {
 
 function textToList(value: string) {
   return value.split(/\n|,/).map((item) => item.trim()).filter(Boolean);
+}
+
+function importSummary(result: { assets: number; findings: number; evidence: number; notes?: number }) {
+  const parts = [
+    `${result.assets} assets`,
+    `${result.findings} findings`,
+    `${result.evidence} evidence`,
+  ];
+  if (result.notes) parts.push(`${result.notes} notes`);
+  return `Imported ${parts.join(', ')}.`;
 }
 
 function duplicateCandidatesForAsset(assetId: string, groups: AssetDuplicateGroup[]) {

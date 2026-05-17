@@ -369,6 +369,60 @@ func (a *App) importCmd() *cobra.Command {
 			return nil
 		},
 	}
+	burp := &cobra.Command{
+		Use:   "burp <xml-path>",
+		Short: "Import Burp Suite XML issues as findings and assets.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			v, err := a.openVault()
+			if err != nil {
+				return err
+			}
+			defer v.Close()
+			result, err := importer.BurpXML(v, args[0])
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Imported %d findings and %d assets\n", result.Findings, result.Assets)
+			return nil
+		},
+	}
+	nessus := &cobra.Command{
+		Use:   "nessus <nessus-path>",
+		Short: "Import Nessus XML report items as findings and assets.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			v, err := a.openVault()
+			if err != nil {
+				return err
+			}
+			defer v.Close()
+			result, err := importer.NessusXML(v, args[0])
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Imported %d findings and %d assets\n", result.Findings, result.Assets)
+			return nil
+		},
+	}
+	bloodhound := &cobra.Command{
+		Use:   "bloodhound <json-path>",
+		Short: "Import BloodHound JSON graph/path exports as assets and relationship notes.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			v, err := a.openVault()
+			if err != nil {
+				return err
+			}
+			defer v.Close()
+			result, err := importer.BloodHoundJSON(v, args[0])
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Imported %d assets and %d relationship notes\n", result.Assets, result.Notes)
+			return nil
+		},
+	}
 	screenshots := &cobra.Command{
 		Use:   "screenshots <folder>",
 		Short: "Import a folder of screenshots as evidence.",
@@ -387,7 +441,7 @@ func (a *App) importCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.AddCommand(nmap, nuclei, screenshots)
+	cmd.AddCommand(nmap, nuclei, burp, nessus, bloodhound, screenshots)
 	return cmd
 }
 

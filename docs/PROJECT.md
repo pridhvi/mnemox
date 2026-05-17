@@ -80,12 +80,14 @@ The primary workflow is the local web UI started with `mnemox serve`. The CLI an
 
 - Nmap XML import.
 - nuclei JSON/JSONL import.
+- Burp Suite XML issue import.
+- Nessus `.nessus` XML import.
+- BloodHound JSON graph/path import as assets and relationship notes.
 - Screenshot folder import.
 
 ## Near-Term Roadmap Order
 
-1. Additional importers: Burp, Nessus, BloodHound.
-2. Evidence citation bundles.
-3. Local semantic search with encrypted embedding cache.
-4. Attack path graph visualization.
-5. Release polish: signed artifacts, Homebrew tap, docs site.
+1. Evidence citation bundles.
+2. Local semantic search with encrypted embedding cache.
+3. Attack path graph visualization.
+4. Release polish: signed artifacts, Homebrew tap, docs site.

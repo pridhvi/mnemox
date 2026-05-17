@@ -264,6 +264,36 @@ func TestAssetMergeMovesRelationsAndRedactsCredentialContext(t *testing.T) {
 	}
 }
 
+func TestWebImportEndpointsForBurpNessusAndBloodHound(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".mnemox")
+	v, err := vault.CreateWithPassphrase(root, "ACME", "test-passphrase")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = v.Close()
+
+	server := New(Options{VaultPath: root, Addr: "127.0.0.1:0"})
+	ts := httptest.NewServer(server.routes())
+	defer ts.Close()
+
+	postJSON(t, ts.URL+"/api/unlock", map[string]any{"passphrase": "test-passphrase"}, http.StatusOK)
+
+	burp := uploadImport(t, ts.URL+"/api/import/burp", "burp.xml", `<issues><issue><name>Reflected XSS</name><host>https://app.example.test</host><path>/search</path><severity>High</severity><confidence>Certain</confidence><issueBackground>XSS background</issueBackground><issueDetail>q reflected</issueDetail><remediationDetail>Encode output</remediationDetail></issue></issues>`)
+	if burp["findings"].(float64) != 1 || burp["assets"].(float64) != 1 {
+		t.Fatalf("unexpected burp import: %#v", burp)
+	}
+
+	nessus := uploadImport(t, ts.URL+"/api/import/nessus", "scan.nessus", `<NessusClientData_v2><Report name="scan"><ReportHost name="web01"><HostProperties><tag name="host-ip">10.0.0.5</tag></HostProperties><ReportItem port="443" protocol="tcp" severity="3" pluginID="123" pluginName="Weak Cipher"><risk_factor>High</risk_factor><synopsis>Weak cipher enabled.</synopsis><solution>Disable weak ciphers.</solution></ReportItem></ReportHost></Report></NessusClientData_v2>`)
+	if nessus["findings"].(float64) != 1 || nessus["assets"].(float64) != 1 {
+		t.Fatalf("unexpected nessus import: %#v", nessus)
+	}
+
+	bloodhound := uploadImport(t, ts.URL+"/api/import/bloodhound", "bloodhound.json", `{"nodes":[{"id":"u1","label":"alice@ACME.LOCAL","kind":"User"},{"id":"c1","label":"DC01.ACME.LOCAL","kind":"Computer"}],"edges":[{"source":"u1","target":"c1","relationship":"AdminTo"}]}`)
+	if bloodhound["assets"].(float64) != 2 || bloodhound["notes"].(float64) != 1 {
+		t.Fatalf("unexpected bloodhound import: %#v", bloodhound)
+	}
+}
+
 func postJSON(t *testing.T, url string, payload any, status int) map[string]any {
 	t.Helper()
 	body, _ := json.Marshal(payload)
@@ -348,7 +378,7 @@ func uploadEvidence(t *testing.T, url string) map[string]any {
 	return doJSON(t, req, http.StatusCreated)
 }
 
-func uploadImport(t *testing.T, url, filename, content string) {
+func uploadImport(t *testing.T, url, filename, content string) map[string]any {
 	t.Helper()
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
@@ -369,4 +399,5 @@ func uploadImport(t *testing.T, url, filename, content string) {
 	if response["assets"].(float64) < 1 {
 		t.Fatalf("expected imported assets: %#v", response)
 	}
+	return response
 }

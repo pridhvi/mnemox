@@ -32,9 +32,9 @@ This is the canonical implementation backlog. Keep it synchronized with code cha
 - [x] Screenshot folder importer.
 - [x] Image evidence preview in web UI.
 - [x] Explicit decrypted blob export.
-- [ ] Burp issue import.
-- [ ] Nessus import.
-- [ ] BloodHound path import.
+- [x] Burp issue import.
+- [x] Nessus import.
+- [x] BloodHound path import.
 - [ ] OCR extraction for screenshots.
 
 ## Milestone 4: Search, Recall, And Paths

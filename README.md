@@ -67,6 +67,9 @@ By default, Mnemox uses `.mnemox/` in the current directory. Set
 - `cred add`: add an encrypted credential record.
 - `import nmap`: import Nmap XML hosts/services as assets.
 - `import nuclei`: import nuclei JSONL findings and assets.
+- `import burp`: import Burp Suite XML issues as findings and assets.
+- `import nessus`: import Nessus XML report items as findings and assets.
+- `import bloodhound`: import BloodHound JSON graph/path exports as assets and relationship notes.
 - `import screenshots`: import a folder of screenshots as evidence.
 - `ask`: local evidence recall over decrypted vault records.
 - `cvss score`: calculate and store a CVSS v4.0 Base score.
