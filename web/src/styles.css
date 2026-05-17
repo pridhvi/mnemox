@@ -581,6 +581,14 @@ label.compact textarea {
   align-items: start;
 }
 
+.table-row strong,
+.table-row span,
+.table-row small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .side-form,
 .settings-grid {
   border: 1px solid var(--line);
@@ -631,6 +639,62 @@ label.compact textarea {
 .relation-list span {
   color: #b4c1cf;
   font-size: 12px;
+}
+
+.path-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.path-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(16, 22, 29, 0.76);
+  padding: 14px;
+  display: grid;
+  gap: 14px;
+}
+
+.path-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.path-header div {
+  display: grid;
+  gap: 4px;
+}
+
+.path-header span,
+.path-column small {
+  color: var(--muted);
+}
+
+.path-header b {
+  color: var(--accent);
+}
+
+.path-columns {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.path-column {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgba(9, 13, 18, 0.55);
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+
+.path-column div {
+  display: grid;
+  gap: 3px;
 }
 
 .search-bar {
@@ -718,7 +782,8 @@ label.compact textarea {
 
   .detail-pane,
   .form-grid,
-  .filter-row {
+  .filter-row,
+  .path-columns {
     grid-template-columns: 1fr;
   }
 

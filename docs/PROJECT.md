@@ -1,0 +1,92 @@
+# Mnemox Project Canon
+
+## Product Definition
+
+Mnemox is a local-first engagement memory system for penetration tests. It keeps findings, assets, evidence, notes, credentials, CVSS v4.0 scoring context, and report-ready Markdown packets in an encrypted local vault.
+
+The primary workflow is the local web UI started with `mnemox serve`. The CLI and console remain supported for fast operator workflows and automation.
+
+## Stack
+
+- Backend: Go standard HTTP server.
+- Vault: local encrypted records and blobs under `.mnemox/`.
+- Frontend: React and TypeScript built as a static SPA.
+- Distribution: compiled frontend embedded into the Go binary.
+- Search: local ranked keyword/fuzzy search over decrypted records at runtime.
+
+## Security Model
+
+- No cloud service, remote sync, telemetry, or external AI/API calls.
+- Server binds to `127.0.0.1` by default.
+- Vault unlock requires a passphrase or `MNEMOX_PASSPHRASE`.
+- The browser never stores the passphrase.
+- The server keeps an in-memory unlocked vault session until lock/logout.
+- Credential secrets are excluded from list, search, asset context, attack path, packet, and preview responses.
+- Credential secret reveal is an explicit record-specific action.
+
+## Current Module Surface
+
+### Findings
+
+- List, create, and edit findings.
+- Link/unlink affected assets.
+- CVSS v4.0 Base calculator with live vector and score.
+- Add notes tied to a finding.
+- Upload evidence tied to a finding.
+- Render copy-ready Markdown Finding Packets.
+
+### Assets
+
+- List and create assets.
+- View linked findings, evidence, notes, and redacted credentials.
+- Use asset filters in search and packet workflows.
+
+### Evidence
+
+- List evidence.
+- Preview image evidence.
+- Edit evidence metadata.
+- Link/unlink evidence to assets.
+- Export decrypted evidence blobs through explicit user action.
+
+### Credentials
+
+- List credentials without secrets.
+- Create and edit credential metadata.
+- Link/unlink credentials to assets.
+- Reveal secrets through explicit user action only.
+
+### Notes
+
+- Notes can be attached to findings.
+- Standalone Notes module supports detail editing.
+- Notes can link/unlink assets.
+
+### Search
+
+- Search findings, notes, evidence metadata, asset metadata, and credential metadata.
+- Credential secrets are excluded.
+- Filters exist for kind and asset relationship.
+
+### Attack Paths
+
+- Relationship data exists through asset links.
+- The web UI shows a simple asset-centered linked-chain view across findings, evidence, notes, and redacted credentials.
+- Graph visualization is a later layer.
+
+### Imports
+
+- Nmap XML import.
+- nuclei JSON/JSONL import.
+- Screenshot folder import.
+
+## Near-Term Roadmap Order
+
+1. Drag-and-drop evidence upload.
+2. Inline Markdown preview for long-form finding fields.
+3. Asset merge/deduplication.
+4. Additional importers: Burp, Nessus, BloodHound.
+5. Evidence citation bundles.
+6. Local semantic search with encrypted embedding cache.
+7. Attack path graph visualization.
+8. Release polish: signed artifacts, Homebrew tap, docs site.

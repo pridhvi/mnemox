@@ -64,10 +64,22 @@ func TestWebAPIWorkflowAndCredentialRedaction(t *testing.T) {
 		"validation":        "Confirm anonymous access is disabled.",
 	}, http.StatusOK)
 
-	postJSON(t, ts.URL+"/api/findings/"+findingID+"/notes", map[string]any{
+	note := postJSON(t, ts.URL+"/api/findings/"+findingID+"/notes", map[string]any{
 		"text":  "Build history was visible",
 		"asset": "ci.acme.local",
 	}, http.StatusCreated)
+	putJSON(t, ts.URL+"/api/notes/"+note["id"].(string), map[string]any{
+		"text":  "Build history and job output were visible",
+		"asset": "ci.acme.local",
+		"tags":  []string{"jenkins"},
+	}, http.StatusOK)
+	notes := getJSON(t, ts.URL+"/api/notes", http.StatusOK)
+	firstNote := notes["items"].([]any)[0].(map[string]any)
+	if firstNote["payload"].(map[string]any)["text"] != "Build history and job output were visible" || len(firstNote["assets"].([]any)) != 1 {
+		t.Fatalf("expected editable linked note: %#v", notes)
+	}
+	deleteJSON(t, ts.URL+"/api/notes/"+note["id"].(string)+"/assets/"+assetID, http.StatusOK)
+	postJSON(t, ts.URL+"/api/notes/"+note["id"].(string)+"/assets", map[string]any{"asset_id": assetID}, http.StatusOK)
 
 	evidenceRecord := uploadEvidence(t, ts.URL+"/api/findings/"+findingID+"/evidence")
 	putJSON(t, ts.URL+"/api/evidence/"+evidenceRecord["id"].(string), map[string]any{
@@ -84,7 +96,7 @@ func TestWebAPIWorkflowAndCredentialRedaction(t *testing.T) {
 	deleteJSON(t, ts.URL+"/api/evidence/"+evidenceRecord["id"].(string)+"/assets/"+assetID, http.StatusOK)
 	postJSON(t, ts.URL+"/api/evidence/"+evidenceRecord["id"].(string)+"/assets", map[string]any{"asset_id": assetID}, http.StatusOK)
 	assetDetail := getJSON(t, ts.URL+"/api/assets/"+assetID, http.StatusOK)
-	if len(assetDetail["findings"].([]any)) != 1 || len(assetDetail["evidence"].([]any)) != 1 {
+	if len(assetDetail["findings"].([]any)) != 1 || len(assetDetail["evidence"].([]any)) != 1 || len(assetDetail["notes"].([]any)) != 1 {
 		t.Fatalf("expected asset relation context: %#v", assetDetail)
 	}
 	filteredFindings := getJSON(t, ts.URL+"/api/findings?asset_id="+assetID, http.StatusOK)
@@ -156,6 +168,14 @@ func TestWebAPIWorkflowAndCredentialRedaction(t *testing.T) {
 	encoded, _ = json.Marshal(relatedCredentialSearch)
 	if strings.Contains(string(encoded), "super-secret-value") || !strings.Contains(string(encoded), "svc_backup") {
 		t.Fatalf("credential relationship search redaction failed: %s", encoded)
+	}
+	attackPaths := getJSON(t, ts.URL+"/api/attack-paths", http.StatusOK)
+	if len(attackPaths["items"].([]any)) != 1 {
+		t.Fatalf("expected attack path chain: %#v", attackPaths)
+	}
+	firstPath := attackPaths["items"].([]any)[0].(map[string]any)
+	if len(firstPath["findings"].([]any)) != 1 || len(firstPath["evidence"].([]any)) != 1 || len(firstPath["notes"].([]any)) != 1 || len(firstPath["credentials"].([]any)) != 1 {
+		t.Fatalf("expected complete attack path chain: %#v", firstPath)
 	}
 }
 

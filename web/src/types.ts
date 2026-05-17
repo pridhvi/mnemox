@@ -41,7 +41,12 @@ export type FindingRecord = RecordEnvelope<FindingPayload> & {
 export type AssetDetail = RecordEnvelope & {
   findings?: FindingRecord[];
   evidence?: RecordEnvelope[];
+  notes?: RecordEnvelope[];
   credentials?: RecordEnvelope[];
+};
+
+export type AttackPath = AssetDetail & {
+  risk_score: number;
 };
 
 export type SearchHit = {

@@ -92,6 +92,8 @@ from searchable material.
 
 ## Backlog And Releases
 
+- Project canon: [docs/PROJECT.md](docs/PROJECT.md)
 - Backlog: [docs/BACKLOG.md](docs/BACKLOG.md)
+- Codex instructions: [AGENTS.md](AGENTS.md)
 - CI: `.github/workflows/ci.yml`
 - Release config: `.goreleaser.yaml`

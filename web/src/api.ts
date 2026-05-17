@@ -1,4 +1,4 @@
-import type { AssetDetail, FindingPayload, FindingRecord, RecordEnvelope, SearchHit } from './types';
+import type { AssetDetail, AttackPath, FindingPayload, FindingRecord, RecordEnvelope, SearchHit } from './types';
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(path, {
@@ -56,6 +56,12 @@ export const api = {
   unlinkEvidenceAsset: (id: string, assetId: string) =>
     request<{ items: RecordEnvelope[] }>(`/api/evidence/${id}/assets/${assetId}`, { method: 'DELETE' }),
   notes: () => request<{ items: RecordEnvelope[] }>('/api/notes'),
+  updateNote: (id: string, payload: { text: string; asset: string; tags: string[] }) =>
+    request<RecordEnvelope>(`/api/notes/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
+  linkNoteAsset: (id: string, assetId: string) =>
+    request<{ items: RecordEnvelope[] }>(`/api/notes/${id}/assets`, { method: 'POST', body: JSON.stringify({ asset_id: assetId }) }),
+  unlinkNoteAsset: (id: string, assetId: string) =>
+    request<{ items: RecordEnvelope[] }>(`/api/notes/${id}/assets/${assetId}`, { method: 'DELETE' }),
   credentials: () => request<{ items: RecordEnvelope[] }>('/api/credentials'),
   createCredential: (payload: { name: string; username: string; secret: string; scope: string; tags: string[] }) =>
     request<RecordEnvelope>('/api/credentials', { method: 'POST', body: JSON.stringify(payload) }),
@@ -73,5 +79,6 @@ export const api = {
     if (filters.assetId) params.set('asset_id', filters.assetId);
     return request<{ items: SearchHit[] }>(`/api/search?${params.toString()}`);
   },
+  attackPaths: () => request<{ items: AttackPath[] }>('/api/attack-paths'),
   settings: () => request<{ vault_path: string; server: string; unlocked: boolean }>('/api/settings'),
 };

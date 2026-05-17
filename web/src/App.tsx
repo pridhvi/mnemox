@@ -18,7 +18,7 @@ import {
 import { type ElementType, type FormEvent, useCallback, useEffect, useState } from 'react';
 import { api } from './api';
 import { defaultMetrics, metricLabels, metricOptions, metricOrder, metricsFromVector, vectorFromMetrics } from './cvss';
-import type { AssetDetail, FindingPayload, FindingRecord, RecordEnvelope, SearchHit } from './types';
+import type { AssetDetail, AttackPath, FindingPayload, FindingRecord, RecordEnvelope, SearchHit } from './types';
 
 type Module = 'findings' | 'assets' | 'evidence' | 'notes' | 'credentials' | 'search' | 'paths' | 'packets' | 'settings';
 
@@ -107,7 +107,7 @@ export function App() {
         {active === 'findings' && <FindingWorkspace key={refreshKey} />}
         {active === 'assets' && <AssetsModule />}
         {active === 'evidence' && <EvidenceModule />}
-        {active === 'notes' && <RecordTable title="Notes" loader={api.notes} />}
+        {active === 'notes' && <NotesModule />}
         {active === 'credentials' && <CredentialsModule />}
         {active === 'search' && <SearchModule />}
         {active === 'paths' && <AttackPathsModule />}
@@ -457,6 +457,97 @@ function RecordTable({ title, loader }: { title: string; loader: () => Promise<{
   );
 }
 
+function NotesModule() {
+  const [items, setItems] = useState<RecordEnvelope[]>([]);
+  const [assets, setAssets] = useState<RecordEnvelope[]>([]);
+  const [selectedId, setSelectedId] = useState('');
+  const [form, setForm] = useState({ text: '', asset: '', tags: '' });
+  const [assetToLink, setAssetToLink] = useState('');
+
+  async function load() {
+    const [notesResponse, assetResponse] = await Promise.all([api.notes(), api.assets()]);
+    setItems(notesResponse.items);
+    setAssets(assetResponse.items);
+    setSelectedId((current) => current || notesResponse.items[0]?.id || '');
+  }
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const selected = items.find((item) => item.id === selectedId) || null;
+
+  useEffect(() => {
+    if (!selected) return;
+    setForm({
+      text: String(selected.payload.text || ''),
+      asset: String(selected.payload.asset || ''),
+      tags: listToCSV(selected.payload.tags as string[] | undefined),
+    });
+  }, [selected]);
+
+  async function save() {
+    if (!selected) return;
+    await api.updateNote(selected.id, { ...form, tags: textToList(form.tags) });
+    await load();
+  }
+
+  async function linkAsset() {
+    if (!selected || !assetToLink) return;
+    await api.linkNoteAsset(selected.id, assetToLink);
+    setAssetToLink('');
+    await load();
+  }
+
+  async function unlinkAsset(assetId: string) {
+    if (!selected) return;
+    await api.unlinkNoteAsset(selected.id, assetId);
+    await load();
+  }
+
+  return (
+    <section className="module-page two-column">
+      <div>
+        <h1>Notes</h1>
+        <div className="table">
+          {items.map((item) => (
+            <button className={`table-row selectable-row ${selectedId === item.id ? 'selected' : ''}`} key={item.id} onClick={() => setSelectedId(item.id)}>
+              <strong>{recordTitle(item)}</strong>
+              <span>{String(item.payload.asset || 'no asset')}</span>
+              <small>{item.assets?.length || 0} linked</small>
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="stack">
+        {selected ? (
+          <>
+            <div className="side-form">
+              <h2>Edit Note</h2>
+              <textarea value={form.text} onChange={(event) => setForm({ ...form, text: event.target.value })} placeholder="note" />
+              <input value={form.asset} onChange={(event) => setForm({ ...form, asset: event.target.value })} placeholder="asset label" />
+              <input value={form.tags} onChange={(event) => setForm({ ...form, tags: event.target.value })} placeholder="tags" />
+              <button className="primary" onClick={save}>Save note</button>
+            </div>
+            <Panel title="Linked Assets">
+              <AssetLinkEditor
+                assets={assets}
+                linked={selected.assets || []}
+                value={assetToLink}
+                onChange={setAssetToLink}
+                onLink={linkAsset}
+                onUnlink={unlinkAsset}
+              />
+            </Panel>
+          </>
+        ) : (
+          <EmptyState title="No note selected" />
+        )}
+      </div>
+    </section>
+  );
+}
+
 function EvidenceModule() {
   const [items, setItems] = useState<RecordEnvelope[]>([]);
   const [assets, setAssets] = useState<RecordEnvelope[]>([]);
@@ -626,6 +717,7 @@ function AssetsModule() {
             </Panel>
             <RelationPanel title="Linked Findings" records={detail.findings || []} empty="No findings linked to this asset yet." />
             <RelationPanel title="Linked Evidence" records={detail.evidence || []} empty="No evidence linked to this asset yet." />
+            <RelationPanel title="Linked Notes" records={detail.notes || []} empty="No notes linked to this asset yet." />
             <RelationPanel title="Linked Credentials" records={detail.credentials || []} empty="No credentials linked to this asset yet." />
           </div>
         )}
@@ -822,13 +914,41 @@ function SearchModule() {
 }
 
 function AttackPathsModule() {
+  const [items, setItems] = useState<AttackPath[]>([]);
+
+  useEffect(() => {
+    api.attackPaths().then((response) => setItems(response.items));
+  }, []);
+
   return (
     <section className="module-page">
       <h1>Attack Paths</h1>
-      <div className="empty-panel">
-        <GitBranch size={28} />
-        <p>Relationship hooks are available through linked notes and evidence. Graph visualization comes after the finding and evidence model settles.</p>
-      </div>
+      {items.length === 0 ? (
+        <div className="empty-panel">
+          <GitBranch size={28} />
+          <p>No linked asset chains yet.</p>
+        </div>
+      ) : (
+        <div className="path-grid">
+          {items.map((path) => (
+            <section className="path-card" key={path.id}>
+              <div className="path-header">
+                <div>
+                  <strong>{assetLabel(path)}</strong>
+                  <span>{String(path.payload.type || 'asset')} · {String(path.payload.value || '')}</span>
+                </div>
+                <b>Risk {path.risk_score}</b>
+              </div>
+              <div className="path-columns">
+                <PathColumn title="Findings" records={path.findings || []} />
+                <PathColumn title="Evidence" records={path.evidence || []} />
+                <PathColumn title="Notes" records={path.notes || []} />
+                <PathColumn title="Credentials" records={path.credentials || []} />
+              </div>
+            </section>
+          ))}
+        </div>
+      )}
     </section>
   );
 }
@@ -995,6 +1115,24 @@ function AssetLinkEditor({
   );
 }
 
+function PathColumn({ title, records }: { title: string; records: RecordEnvelope[] }) {
+  return (
+    <div className="path-column">
+      <h2>{title}</h2>
+      {records.length === 0 ? (
+        <span className="muted">None</span>
+      ) : (
+        records.map((record) => (
+          <div key={record.id}>
+            <strong>{recordTitle(record)}</strong>
+            <small>{relationSummary(record) || record.kind}</small>
+          </div>
+        ))
+      )}
+    </div>
+  );
+}
+
 function EvidenceCards({ records }: { records: RecordEnvelope[] }) {
   return (
     <div className="evidence-grid compact-grid">
@@ -1070,6 +1208,9 @@ function relationSummary(record: RecordEnvelope) {
   }
   if (record.kind === 'credential') {
     return [record.payload.username, record.payload.scope].filter(Boolean).join(' · ');
+  }
+  if (record.kind === 'note') {
+    return [record.payload.asset, record.payload.text].filter(Boolean).join(' · ');
   }
   return [record.payload.type, record.payload.value].filter(Boolean).join(' · ');
 }

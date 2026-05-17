@@ -100,12 +100,16 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/evidence/{id}/assets", s.requireUnlock(s.handleLinkEvidenceAsset))
 	mux.HandleFunc("DELETE /api/evidence/{id}/assets/{asset_id}", s.requireUnlock(s.handleUnlinkEvidenceAsset))
 	mux.HandleFunc("GET /api/notes", s.requireUnlock(s.handleListNotes))
+	mux.HandleFunc("PUT /api/notes/{id}", s.requireUnlock(s.handleUpdateNote))
+	mux.HandleFunc("POST /api/notes/{id}/assets", s.requireUnlock(s.handleLinkNoteAsset))
+	mux.HandleFunc("DELETE /api/notes/{id}/assets/{asset_id}", s.requireUnlock(s.handleUnlinkNoteAsset))
 	mux.HandleFunc("GET /api/credentials", s.requireUnlock(s.handleListCredentials))
 	mux.HandleFunc("POST /api/credentials", s.requireUnlock(s.handleCreateCredential))
 	mux.HandleFunc("PUT /api/credentials/{id}", s.requireUnlock(s.handleUpdateCredential))
 	mux.HandleFunc("GET /api/credentials/{id}/secret", s.requireUnlock(s.handleCredentialSecret))
 	mux.HandleFunc("POST /api/credentials/{id}/assets", s.requireUnlock(s.handleLinkCredentialAsset))
 	mux.HandleFunc("DELETE /api/credentials/{id}/assets/{asset_id}", s.requireUnlock(s.handleUnlinkCredentialAsset))
+	mux.HandleFunc("GET /api/attack-paths", s.requireUnlock(s.handleAttackPaths))
 	mux.HandleFunc("GET /api/search", s.requireUnlock(s.handleSearch))
 	mux.HandleFunc("GET /api/settings", s.requireUnlock(s.handleSettings))
 	mux.Handle("/", spaHandler())
@@ -354,6 +358,9 @@ func (s *Server) handleAddFindingNote(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if assetID := s.assetIDByNameOrValue(body.Asset); assetID != "" {
+		_ = v.AddLink(id, assetID, "note_asset")
+	}
 	rec, _ := v.GetRecord(id)
 	writeJSON(w, http.StatusCreated, recordResponse(rec))
 }
@@ -522,10 +529,12 @@ func (s *Server) handleGetAsset(w http.ResponseWriter, r *http.Request) {
 	}
 	findings, _ := v.LinkedFrom(rec.ID, "affects_asset")
 	evidence, _ := v.LinkedFrom(rec.ID, "evidence_asset")
+	notes, _ := v.LinkedFrom(rec.ID, "note_asset")
 	credentials, _ := v.LinkedFrom(rec.ID, "credential_asset")
 	response := recordResponse(rec)
 	response["findings"] = recordList(findings, false)
 	response["evidence"] = recordList(evidence, false)
+	response["notes"] = recordList(notes, false)
 	response["credentials"] = recordList(credentials, true)
 	writeJSON(w, http.StatusOK, response)
 }
@@ -715,12 +724,82 @@ func (s *Server) handleUnlinkEvidenceAsset(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) handleListNotes(w http.ResponseWriter, r *http.Request) {
-	records, err := s.currentVault().Records("note")
+	v := s.currentVault()
+	records, err := v.Records("note")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": recordList(records, false)})
+	writeJSON(w, http.StatusOK, map[string]any{"items": recordListWithAssets(v, records, false, "note_asset")})
+}
+
+func (s *Server) handleUpdateNote(w http.ResponseWriter, r *http.Request) {
+	v := s.currentVault()
+	rec, err := v.GetRecord(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if rec.Kind != "note" {
+		writeError(w, http.StatusBadRequest, "record is not a note")
+		return
+	}
+	var body map[string]any
+	if err := readJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	next := cloneMap(rec.Payload)
+	for _, key := range []string{"text", "asset"} {
+		if _, ok := body[key]; ok {
+			next[key] = asString(body[key])
+		}
+	}
+	if _, ok := body["tags"]; ok {
+		next["tags"] = asStringSlice(body["tags"])
+	}
+	if strings.TrimSpace(asString(next["text"])) == "" {
+		writeError(w, http.StatusBadRequest, "text is required")
+		return
+	}
+	if err := v.UpdateRecord(rec.ID, next); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if assetID := s.assetIDByNameOrValue(asString(next["asset"])); assetID != "" {
+		_ = v.AddLink(rec.ID, assetID, "note_asset")
+	}
+	updated, _ := v.GetRecord(rec.ID)
+	response := recordResponse(updated)
+	assets, _ := v.Linked(updated.ID, "note_asset")
+	response["assets"] = recordList(assets, false)
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (s *Server) handleLinkNoteAsset(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		AssetID string `json:"asset_id"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := s.linkTypedRecords(r.PathValue("id"), body.AssetID, "note", "asset", "note_asset"); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	assets, _ := s.currentVault().Linked(r.PathValue("id"), "note_asset")
+	writeJSON(w, http.StatusOK, map[string]any{"items": recordList(assets, false)})
+}
+
+func (s *Server) handleUnlinkNoteAsset(w http.ResponseWriter, r *http.Request) {
+	v := s.currentVault()
+	if err := v.RemoveLink(r.PathValue("id"), r.PathValue("asset_id"), "note_asset"); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	assets, _ := v.Linked(r.PathValue("id"), "note_asset")
+	writeJSON(w, http.StatusOK, map[string]any{"items": recordList(assets, false)})
 }
 
 func (s *Server) handleListCredentials(w http.ResponseWriter, r *http.Request) {
@@ -840,6 +919,33 @@ func (s *Server) handleUnlinkCredentialAsset(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, map[string]any{"items": recordList(assets, false)})
 }
 
+func (s *Server) handleAttackPaths(w http.ResponseWriter, r *http.Request) {
+	v := s.currentVault()
+	assets, err := v.Records("asset")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	items := make([]map[string]any, 0, len(assets))
+	for _, asset := range assets {
+		findings, _ := v.LinkedFrom(asset.ID, "affects_asset")
+		evidence, _ := v.LinkedFrom(asset.ID, "evidence_asset")
+		notes, _ := v.LinkedFrom(asset.ID, "note_asset")
+		credentials, _ := v.LinkedFrom(asset.ID, "credential_asset")
+		if len(findings)+len(evidence)+len(notes)+len(credentials) == 0 {
+			continue
+		}
+		item := recordResponse(asset)
+		item["findings"] = recordList(findings, false)
+		item["evidence"] = recordList(evidence, false)
+		item["notes"] = recordList(notes, false)
+		item["credentials"] = recordList(credentials, true)
+		item["risk_score"] = attackPathRisk(findings, evidence, credentials)
+		items = append(items, item)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query().Get("q")
 	kind := r.URL.Query().Get("kind")
@@ -915,6 +1021,7 @@ func (s *Server) assetRelatedRecords(assetID, kind string) ([]vault.Record, erro
 	relations := []relation{
 		{kind: "finding", name: "affects_asset"},
 		{kind: "evidence", name: "evidence_asset"},
+		{kind: "note", name: "note_asset"},
 		{kind: "credential", name: "credential_asset"},
 	}
 	if kind == "" || kind == "all" || kind == "asset" {
@@ -936,6 +1043,25 @@ func (s *Server) assetRelatedRecords(assetID, kind string) ([]vault.Record, erro
 		out = append(out, records...)
 	}
 	return out, nil
+}
+
+func (s *Server) assetIDByNameOrValue(value string) string {
+	value = strings.TrimSpace(strings.ToLower(value))
+	if value == "" {
+		return ""
+	}
+	assets, err := s.currentVault().Records("asset")
+	if err != nil {
+		return ""
+	}
+	for _, asset := range assets {
+		name := strings.ToLower(asString(asset.Payload["name"]))
+		assetValue := strings.ToLower(asString(asset.Payload["value"]))
+		if value == name || value == assetValue {
+			return asset.ID
+		}
+	}
+	return ""
 }
 
 func searchRecordHits(records []vault.Record, query string, limit int) []vault.SearchHit {
@@ -960,6 +1086,25 @@ func searchRecordHits(records []vault.Record, query string, limit int) []vault.S
 		return hits[:limit]
 	}
 	return hits
+}
+
+func attackPathRisk(findings, evidence, credentials []vault.Record) int {
+	score := len(evidence) + len(credentials)*2
+	for _, finding := range findings {
+		switch strings.ToUpper(asString(finding.Payload["severity"])) {
+		case "CRITICAL":
+			score += 5
+		case "HIGH":
+			score += 4
+		case "MEDIUM":
+			score += 3
+		case "LOW":
+			score += 2
+		default:
+			score++
+		}
+	}
+	return score
 }
 
 func relationshipExcerpt(rec vault.Record) string {
