@@ -555,6 +555,7 @@ label.compact textarea {
   align-items: center;
 }
 
+.table-row.selectable-row,
 .table-row.asset-row {
   width: 100%;
   min-height: auto;
@@ -566,6 +567,7 @@ label.compact textarea {
   text-align: left;
 }
 
+.table-row.selectable-row.selected,
 .table-row.asset-row.selected {
   background: #16212b;
 }

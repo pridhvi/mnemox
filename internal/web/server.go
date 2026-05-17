@@ -94,14 +94,18 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/import/nuclei", s.requireUnlock(s.handleImportNuclei))
 	mux.HandleFunc("POST /api/import/screenshots", s.requireUnlock(s.handleImportScreenshots))
 	mux.HandleFunc("GET /api/evidence", s.requireUnlock(s.handleListEvidence))
+	mux.HandleFunc("PUT /api/evidence/{id}", s.requireUnlock(s.handleUpdateEvidence))
 	mux.HandleFunc("GET /api/evidence/{id}/download", s.requireUnlock(s.handleDownloadEvidence))
 	mux.HandleFunc("GET /api/evidence/{id}/preview", s.requireUnlock(s.handlePreviewEvidence))
 	mux.HandleFunc("POST /api/evidence/{id}/assets", s.requireUnlock(s.handleLinkEvidenceAsset))
+	mux.HandleFunc("DELETE /api/evidence/{id}/assets/{asset_id}", s.requireUnlock(s.handleUnlinkEvidenceAsset))
 	mux.HandleFunc("GET /api/notes", s.requireUnlock(s.handleListNotes))
 	mux.HandleFunc("GET /api/credentials", s.requireUnlock(s.handleListCredentials))
 	mux.HandleFunc("POST /api/credentials", s.requireUnlock(s.handleCreateCredential))
+	mux.HandleFunc("PUT /api/credentials/{id}", s.requireUnlock(s.handleUpdateCredential))
 	mux.HandleFunc("GET /api/credentials/{id}/secret", s.requireUnlock(s.handleCredentialSecret))
 	mux.HandleFunc("POST /api/credentials/{id}/assets", s.requireUnlock(s.handleLinkCredentialAsset))
+	mux.HandleFunc("DELETE /api/credentials/{id}/assets/{asset_id}", s.requireUnlock(s.handleUnlinkCredentialAsset))
 	mux.HandleFunc("GET /api/search", s.requireUnlock(s.handleSearch))
 	mux.HandleFunc("GET /api/settings", s.requireUnlock(s.handleSettings))
 	mux.Handle("/", spaHandler())
@@ -582,12 +586,49 @@ func (s *Server) handleImportFile(w http.ResponseWriter, r *http.Request, fn fun
 }
 
 func (s *Server) handleListEvidence(w http.ResponseWriter, r *http.Request) {
-	records, err := s.currentVault().Records("evidence")
+	v := s.currentVault()
+	records, err := v.Records("evidence")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": recordList(records, false)})
+	writeJSON(w, http.StatusOK, map[string]any{"items": recordListWithAssets(v, records, false, "evidence_asset")})
+}
+
+func (s *Server) handleUpdateEvidence(w http.ResponseWriter, r *http.Request) {
+	v := s.currentVault()
+	rec, err := v.GetRecord(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if rec.Kind != "evidence" {
+		writeError(w, http.StatusBadRequest, "record is not evidence")
+		return
+	}
+	var body map[string]any
+	if err := readJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	next := cloneMap(rec.Payload)
+	for _, key := range []string{"kind", "caption", "original_path"} {
+		if _, ok := body[key]; ok {
+			next[key] = asString(body[key])
+		}
+	}
+	if _, ok := body["tags"]; ok {
+		next["tags"] = asStringSlice(body["tags"])
+	}
+	if err := v.UpdateRecord(rec.ID, next); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	updated, _ := v.GetRecord(rec.ID)
+	response := recordResponse(updated)
+	assets, _ := v.Linked(updated.ID, "evidence_asset")
+	response["assets"] = recordList(assets, false)
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (s *Server) handleDownloadEvidence(w http.ResponseWriter, r *http.Request) {
@@ -663,6 +704,16 @@ func (s *Server) handleLinkEvidenceAsset(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, map[string]any{"items": recordList(assets, false)})
 }
 
+func (s *Server) handleUnlinkEvidenceAsset(w http.ResponseWriter, r *http.Request) {
+	v := s.currentVault()
+	if err := v.RemoveLink(r.PathValue("id"), r.PathValue("asset_id"), "evidence_asset"); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	assets, _ := v.Linked(r.PathValue("id"), "evidence_asset")
+	writeJSON(w, http.StatusOK, map[string]any{"items": recordList(assets, false)})
+}
+
 func (s *Server) handleListNotes(w http.ResponseWriter, r *http.Request) {
 	records, err := s.currentVault().Records("note")
 	if err != nil {
@@ -673,12 +724,13 @@ func (s *Server) handleListNotes(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListCredentials(w http.ResponseWriter, r *http.Request) {
-	records, err := s.currentVault().Records("credential")
+	v := s.currentVault()
+	records, err := v.Records("credential")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": recordList(records, true)})
+	writeJSON(w, http.StatusOK, map[string]any{"items": recordListWithAssets(v, records, true, "credential_asset")})
 }
 
 func (s *Server) handleCreateCredential(w http.ResponseWriter, r *http.Request) {
@@ -704,6 +756,49 @@ func (s *Server) handleCreateCredential(w http.ResponseWriter, r *http.Request) 
 	}
 	rec, _ := s.currentVault().GetRecord(id)
 	writeJSON(w, http.StatusCreated, sanitizeRecord(rec, true))
+}
+
+func (s *Server) handleUpdateCredential(w http.ResponseWriter, r *http.Request) {
+	v := s.currentVault()
+	rec, err := v.GetRecord(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if rec.Kind != "credential" {
+		writeError(w, http.StatusBadRequest, "record is not a credential")
+		return
+	}
+	var body map[string]any
+	if err := readJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	next := cloneMap(rec.Payload)
+	for _, key := range []string{"name", "username", "scope"} {
+		if _, ok := body[key]; ok {
+			next[key] = asString(body[key])
+		}
+	}
+	if _, ok := body["tags"]; ok {
+		next["tags"] = asStringSlice(body["tags"])
+	}
+	if secret, ok := body["secret"]; ok && strings.TrimSpace(asString(secret)) != "" {
+		next["secret"] = asString(secret)
+	}
+	if strings.TrimSpace(asString(next["name"])) == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	if err := v.UpdateRecord(rec.ID, next); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	updated, _ := v.GetRecord(rec.ID)
+	response := sanitizeRecord(updated, true)
+	assets, _ := v.Linked(updated.ID, "credential_asset")
+	response["assets"] = recordList(assets, false)
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (s *Server) handleCredentialSecret(w http.ResponseWriter, r *http.Request) {
@@ -732,6 +827,16 @@ func (s *Server) handleLinkCredentialAsset(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	assets, _ := s.currentVault().Linked(r.PathValue("id"), "credential_asset")
+	writeJSON(w, http.StatusOK, map[string]any{"items": recordList(assets, false)})
+}
+
+func (s *Server) handleUnlinkCredentialAsset(w http.ResponseWriter, r *http.Request) {
+	v := s.currentVault()
+	if err := v.RemoveLink(r.PathValue("id"), r.PathValue("asset_id"), "credential_asset"); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	assets, _ := v.Linked(r.PathValue("id"), "credential_asset")
 	writeJSON(w, http.StatusOK, map[string]any{"items": recordList(assets, false)})
 }
 
@@ -934,6 +1039,17 @@ func recordList(records []vault.Record, redactCredential bool) []map[string]any 
 	items := make([]map[string]any, 0, len(records))
 	for _, rec := range records {
 		items = append(items, sanitizeRecord(rec, redactCredential))
+	}
+	return items
+}
+
+func recordListWithAssets(v *vault.Vault, records []vault.Record, redactCredential bool, relation string) []map[string]any {
+	items := make([]map[string]any, 0, len(records))
+	for _, rec := range records {
+		item := sanitizeRecord(rec, redactCredential)
+		assets, _ := v.Linked(rec.ID, relation)
+		item["assets"] = recordList(assets, false)
+		items = append(items, item)
 	}
 	return items
 }

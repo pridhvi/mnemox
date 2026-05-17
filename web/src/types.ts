@@ -4,6 +4,7 @@ export type RecordEnvelope<T = Record<string, unknown>> = {
   created_at: string;
   updated_at: string;
   payload: T;
+  assets?: RecordEnvelope[];
 };
 
 export type CvssState = {

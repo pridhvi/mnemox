@@ -70,6 +70,19 @@ func TestWebAPIWorkflowAndCredentialRedaction(t *testing.T) {
 	}, http.StatusCreated)
 
 	evidenceRecord := uploadEvidence(t, ts.URL+"/api/findings/"+findingID+"/evidence")
+	putJSON(t, ts.URL+"/api/evidence/"+evidenceRecord["id"].(string), map[string]any{
+		"kind":    "screenshot",
+		"caption": "Updated dashboard proof",
+		"tags":    []string{"auth"},
+	}, http.StatusOK)
+	postJSON(t, ts.URL+"/api/evidence/"+evidenceRecord["id"].(string)+"/assets", map[string]any{"asset_id": assetID}, http.StatusOK)
+	evidenceList := getJSON(t, ts.URL+"/api/evidence", http.StatusOK)
+	firstEvidence := evidenceList["items"].([]any)[0].(map[string]any)
+	if firstEvidence["payload"].(map[string]any)["caption"] != "Updated dashboard proof" || len(firstEvidence["assets"].([]any)) != 1 {
+		t.Fatalf("expected editable linked evidence: %#v", evidenceList)
+	}
+	deleteJSON(t, ts.URL+"/api/evidence/"+evidenceRecord["id"].(string)+"/assets/"+assetID, http.StatusOK)
+	postJSON(t, ts.URL+"/api/evidence/"+evidenceRecord["id"].(string)+"/assets", map[string]any{"asset_id": assetID}, http.StatusOK)
 	assetDetail := getJSON(t, ts.URL+"/api/assets/"+assetID, http.StatusOK)
 	if len(assetDetail["findings"].([]any)) != 1 || len(assetDetail["evidence"].([]any)) != 1 {
 		t.Fatalf("expected asset relation context: %#v", assetDetail)
@@ -107,6 +120,19 @@ func TestWebAPIWorkflowAndCredentialRedaction(t *testing.T) {
 		"secret":   "super-secret-value",
 		"scope":    "domain",
 	}, http.StatusCreated)
+	putJSON(t, ts.URL+"/api/credentials/"+credential["id"].(string), map[string]any{
+		"name":     "svc_backup_rotated",
+		"username": "svc_backup",
+		"scope":    "ci.acme.local",
+		"tags":     []string{"prod"},
+	}, http.StatusOK)
+	postJSON(t, ts.URL+"/api/credentials/"+credential["id"].(string)+"/assets", map[string]any{"asset_id": assetID}, http.StatusOK)
+	credentialList := getJSON(t, ts.URL+"/api/credentials", http.StatusOK)
+	firstCredential := credentialList["items"].([]any)[0].(map[string]any)
+	if firstCredential["payload"].(map[string]any)["name"] != "svc_backup_rotated" || len(firstCredential["assets"].([]any)) != 1 {
+		t.Fatalf("expected editable linked credential: %#v", credentialList)
+	}
+	deleteJSON(t, ts.URL+"/api/credentials/"+credential["id"].(string)+"/assets/"+assetID, http.StatusOK)
 	postJSON(t, ts.URL+"/api/credentials/"+credential["id"].(string)+"/assets", map[string]any{"asset_id": assetID}, http.StatusOK)
 	assetDetail = getJSON(t, ts.URL+"/api/assets/"+assetID, http.StatusOK)
 	if len(assetDetail["credentials"].([]any)) != 1 {
@@ -158,6 +184,15 @@ func putJSON(t *testing.T, url string, payload any, status int) map[string]any {
 func getJSON(t *testing.T, url string, status int) map[string]any {
 	t.Helper()
 	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return doJSON(t, req, status)
+}
+
+func deleteJSON(t *testing.T, url string, status int) map[string]any {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodDelete, url, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

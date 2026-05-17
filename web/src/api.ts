@@ -49,11 +49,23 @@ export const api = {
   importScreenshots: (path: string) =>
     request<{ assets: number; findings: number; evidence: number }>('/api/import/screenshots', { method: 'POST', body: JSON.stringify({ path }) }),
   evidence: () => request<{ items: RecordEnvelope[] }>('/api/evidence'),
+  updateEvidence: (id: string, payload: { kind: string; caption: string; original_path: string; tags: string[] }) =>
+    request<RecordEnvelope>(`/api/evidence/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
+  linkEvidenceAsset: (id: string, assetId: string) =>
+    request<{ items: RecordEnvelope[] }>(`/api/evidence/${id}/assets`, { method: 'POST', body: JSON.stringify({ asset_id: assetId }) }),
+  unlinkEvidenceAsset: (id: string, assetId: string) =>
+    request<{ items: RecordEnvelope[] }>(`/api/evidence/${id}/assets/${assetId}`, { method: 'DELETE' }),
   notes: () => request<{ items: RecordEnvelope[] }>('/api/notes'),
   credentials: () => request<{ items: RecordEnvelope[] }>('/api/credentials'),
   createCredential: (payload: { name: string; username: string; secret: string; scope: string; tags: string[] }) =>
     request<RecordEnvelope>('/api/credentials', { method: 'POST', body: JSON.stringify(payload) }),
+  updateCredential: (id: string, payload: { name: string; username: string; secret?: string; scope: string; tags: string[] }) =>
+    request<RecordEnvelope>(`/api/credentials/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
   revealCredential: (id: string) => request<{ secret: string }>(`/api/credentials/${id}/secret`),
+  linkCredentialAsset: (id: string, assetId: string) =>
+    request<{ items: RecordEnvelope[] }>(`/api/credentials/${id}/assets`, { method: 'POST', body: JSON.stringify({ asset_id: assetId }) }),
+  unlinkCredentialAsset: (id: string, assetId: string) =>
+    request<{ items: RecordEnvelope[] }>(`/api/credentials/${id}/assets/${assetId}`, { method: 'DELETE' }),
   search: (query: string, filters: { kind?: string; assetId?: string } = {}) => {
     const params = new URLSearchParams();
     if (query) params.set('q', query);

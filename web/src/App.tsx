@@ -459,16 +459,95 @@ function RecordTable({ title, loader }: { title: string; loader: () => Promise<{
 
 function EvidenceModule() {
   const [items, setItems] = useState<RecordEnvelope[]>([]);
+  const [assets, setAssets] = useState<RecordEnvelope[]>([]);
+  const [selectedId, setSelectedId] = useState('');
+  const [form, setForm] = useState({ kind: 'file', caption: '', original_path: '', tags: '' });
+  const [assetToLink, setAssetToLink] = useState('');
+
+  async function load() {
+    const [evidenceResponse, assetResponse] = await Promise.all([api.evidence(), api.assets()]);
+    setItems(evidenceResponse.items);
+    setAssets(assetResponse.items);
+    setSelectedId((current) => current || evidenceResponse.items[0]?.id || '');
+  }
+
   useEffect(() => {
-    api.evidence().then((response) => setItems(response.items));
+    load();
   }, []);
+
+  const selected = items.find((item) => item.id === selectedId) || null;
+
+  useEffect(() => {
+    if (!selected) return;
+    setForm({
+      kind: String(selected.payload.kind || 'file'),
+      caption: String(selected.payload.caption || ''),
+      original_path: String(selected.payload.original_path || ''),
+      tags: listToCSV(selected.payload.tags as string[] | undefined),
+    });
+  }, [selected]);
+
+  async function save() {
+    if (!selected) return;
+    await api.updateEvidence(selected.id, { ...form, tags: textToList(form.tags) });
+    await load();
+  }
+
+  async function linkAsset() {
+    if (!selected || !assetToLink) return;
+    await api.linkEvidenceAsset(selected.id, assetToLink);
+    setAssetToLink('');
+    await load();
+  }
+
+  async function unlinkAsset(assetId: string) {
+    if (!selected) return;
+    await api.unlinkEvidenceAsset(selected.id, assetId);
+    await load();
+  }
+
   return (
-    <section className="module-page">
-      <h1>Evidence</h1>
-      <div className="evidence-grid">
-        {items.map((item) => (
-          <EvidenceCard key={item.id} record={item} />
-        ))}
+    <section className="module-page two-column">
+      <div>
+        <h1>Evidence</h1>
+        <div className="table">
+          {items.map((item) => (
+            <button className={`table-row selectable-row ${selectedId === item.id ? 'selected' : ''}`} key={item.id} onClick={() => setSelectedId(item.id)}>
+              <strong>{recordTitle(item)}</strong>
+              <span>{String(item.payload.kind || 'file')}</span>
+              <small>{item.assets?.length || 0} assets</small>
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="stack">
+        {selected ? (
+          <>
+            <EvidenceCard record={selected} />
+            <div className="side-form">
+              <h2>Edit Evidence</h2>
+              <select value={form.kind} onChange={(event) => setForm({ ...form, kind: event.target.value })}>
+                {['screenshot', 'file', 'request', 'response', 'log', 'other'].map((option) => <option key={option}>{option}</option>)}
+              </select>
+              <input value={form.caption} onChange={(event) => setForm({ ...form, caption: event.target.value })} placeholder="caption" />
+              <input value={form.original_path} onChange={(event) => setForm({ ...form, original_path: event.target.value })} placeholder="original path" />
+              <input value={form.tags} onChange={(event) => setForm({ ...form, tags: event.target.value })} placeholder="tags" />
+              <button className="primary" onClick={save}>Save evidence</button>
+            </div>
+            <Panel title="Linked Assets">
+              <AssetLinkEditor
+                assets={assets}
+                linked={selected.assets || []}
+                value={assetToLink}
+                onChange={setAssetToLink}
+                onLink={linkAsset}
+                onUnlink={unlinkAsset}
+              />
+            </Panel>
+          </>
+        ) : (
+          <EmptyState title="No evidence selected" />
+        )}
       </div>
     </section>
   );
@@ -587,24 +666,62 @@ function AssetsModule() {
 
 function CredentialsModule() {
   const [items, setItems] = useState<RecordEnvelope[]>([]);
+  const [assets, setAssets] = useState<RecordEnvelope[]>([]);
+  const [selectedId, setSelectedId] = useState('');
   const [form, setForm] = useState({ name: '', username: '', secret: '', scope: '', tags: '' });
+  const [editForm, setEditForm] = useState({ name: '', username: '', secret: '', scope: '', tags: '' });
   const [revealed, setRevealed] = useState<Record<string, string>>({});
+  const [assetToLink, setAssetToLink] = useState('');
   async function load() {
-    const response = await api.credentials();
-    setItems(response.items);
+    const [credentialResponse, assetResponse] = await Promise.all([api.credentials(), api.assets()]);
+    setItems(credentialResponse.items);
+    setAssets(assetResponse.items);
+    setSelectedId((current) => current || credentialResponse.items[0]?.id || '');
   }
   useEffect(() => {
     load();
   }, []);
+
+  const selected = items.find((item) => item.id === selectedId) || null;
+
+  useEffect(() => {
+    if (!selected) return;
+    setEditForm({
+      name: String(selected.payload.name || ''),
+      username: String(selected.payload.username || ''),
+      secret: '',
+      scope: String(selected.payload.scope || ''),
+      tags: listToCSV(selected.payload.tags as string[] | undefined),
+    });
+  }, [selected]);
+
   async function create(event: FormEvent) {
     event.preventDefault();
-    await api.createCredential({ ...form, tags: textToList(form.tags) });
+    const created = await api.createCredential({ ...form, tags: textToList(form.tags) });
     setForm({ name: '', username: '', secret: '', scope: '', tags: '' });
+    setSelectedId(created.id);
+    await load();
+  }
+  async function save() {
+    if (!selected) return;
+    await api.updateCredential(selected.id, { ...editForm, tags: textToList(editForm.tags) });
+    setEditForm({ ...editForm, secret: '' });
     await load();
   }
   async function reveal(id: string) {
     const response = await api.revealCredential(id);
     setRevealed({ ...revealed, [id]: response.secret });
+  }
+  async function linkAsset() {
+    if (!selected || !assetToLink) return;
+    await api.linkCredentialAsset(selected.id, assetToLink);
+    setAssetToLink('');
+    await load();
+  }
+  async function unlinkAsset(assetId: string) {
+    if (!selected) return;
+    await api.unlinkCredentialAsset(selected.id, assetId);
+    await load();
   }
   return (
     <section className="module-page two-column">
@@ -612,21 +729,48 @@ function CredentialsModule() {
         <h1>Credentials</h1>
         <div className="table">
           {items.map((item) => (
-            <div className="table-row" key={item.id}>
+            <button className={`table-row selectable-row ${selectedId === item.id ? 'selected' : ''}`} key={item.id} onClick={() => setSelectedId(item.id)}>
               <strong>{String(item.payload.name)}</strong>
               <span>{String(item.payload.username || 'no username')}</span>
-              <button onClick={() => reveal(item.id)}>{revealed[item.id] ? revealed[item.id] : 'Reveal'}</button>
-            </div>
+              <small>{item.assets?.length || 0} assets</small>
+            </button>
           ))}
         </div>
       </div>
-      <form className="side-form" onSubmit={create}>
-        <h2>Add Credential</h2>
-        {(['name', 'username', 'secret', 'scope', 'tags'] as const).map((key) => (
-          <input key={key} type={key === 'secret' ? 'password' : 'text'} value={form[key]} onChange={(event) => setForm({ ...form, [key]: event.target.value })} placeholder={key} />
-        ))}
-        <button className="primary">Save credential</button>
-      </form>
+      <div className="stack">
+        {selected && (
+          <>
+            <div className="side-form">
+              <h2>Edit Credential</h2>
+              {(['name', 'username', 'scope', 'tags'] as const).map((key) => (
+                <input key={key} value={editForm[key]} onChange={(event) => setEditForm({ ...editForm, [key]: event.target.value })} placeholder={key} />
+              ))}
+              <input type="password" value={editForm.secret} onChange={(event) => setEditForm({ ...editForm, secret: event.target.value })} placeholder="new secret" />
+              <div className="packet-actions">
+                <button className="primary" onClick={save}>Save credential</button>
+                <button onClick={() => reveal(selected.id)}>{revealed[selected.id] ? revealed[selected.id] : 'Reveal secret'}</button>
+              </div>
+            </div>
+            <Panel title="Linked Assets">
+              <AssetLinkEditor
+                assets={assets}
+                linked={selected.assets || []}
+                value={assetToLink}
+                onChange={setAssetToLink}
+                onLink={linkAsset}
+                onUnlink={unlinkAsset}
+              />
+            </Panel>
+          </>
+        )}
+        <form className="side-form" onSubmit={create}>
+          <h2>Add Credential</h2>
+          {(['name', 'username', 'secret', 'scope', 'tags'] as const).map((key) => (
+            <input key={key} type={key === 'secret' ? 'password' : 'text'} value={form[key]} onChange={(event) => setForm({ ...form, [key]: event.target.value })} placeholder={key} />
+          ))}
+          <button className="primary">Save credential</button>
+        </form>
+      </div>
     </section>
   );
 }
@@ -813,6 +957,44 @@ function RelationPanel({ title, records, empty }: { title: string; records: Reco
   );
 }
 
+function AssetLinkEditor({
+  assets,
+  linked,
+  value,
+  onChange,
+  onLink,
+  onUnlink,
+}: {
+  assets: RecordEnvelope[];
+  linked: RecordEnvelope[];
+  value: string;
+  onChange: (value: string) => void;
+  onLink: () => void;
+  onUnlink: (assetId: string) => void;
+}) {
+  const linkedIds = new Set(linked.map((asset) => asset.id));
+  return (
+    <>
+      <div className="asset-linker">
+        <select value={value} onChange={(event) => onChange(event.target.value)}>
+          <option value="">Select asset</option>
+          {assets.filter((asset) => !linkedIds.has(asset.id)).map((asset) => (
+            <option key={asset.id} value={asset.id}>{assetLabel(asset)}</option>
+          ))}
+        </select>
+        <button onClick={onLink}>Link</button>
+      </div>
+      <div className="chip-list">
+        {linked.map((asset) => (
+          <button key={asset.id} onClick={() => onUnlink(asset.id)} title="Unlink asset">
+            {assetLabel(asset)}
+          </button>
+        ))}
+      </div>
+    </>
+  );
+}
+
 function EvidenceCards({ records }: { records: RecordEnvelope[] }) {
   return (
     <div className="evidence-grid compact-grid">
@@ -853,6 +1035,10 @@ function EmptyState({ title }: { title: string }) {
 
 function listToText(values?: string[]) {
   return (values || []).join('\n');
+}
+
+function listToCSV(values?: string[]) {
+  return (values || []).join(', ');
 }
 
 function textToList(value: string) {
