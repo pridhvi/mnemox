@@ -22,8 +22,8 @@ This is the canonical implementation backlog. Keep it synchronized with code cha
 - [x] Loading/error states for primary web modules.
 - [x] Notes module detail/edit workflow.
 - [ ] Bulk edit affected assets from imported scan data.
-- [ ] Drag-and-drop evidence upload.
-- [ ] Inline Markdown preview for long-form finding fields.
+- [x] Drag-and-drop evidence upload.
+- [x] Inline Markdown preview for long-form finding fields.
 
 ## Milestone 3: Evidence And Imports
 

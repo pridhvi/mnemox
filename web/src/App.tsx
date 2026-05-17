@@ -15,7 +15,7 @@ import {
   StickyNote,
   Upload,
 } from 'lucide-react';
-import { type ElementType, type FormEvent, useCallback, useEffect, useState } from 'react';
+import { type DragEvent, type ElementType, type FormEvent, type ReactNode, useCallback, useEffect, useState } from 'react';
 import { api } from './api';
 import { defaultMetrics, metricLabels, metricOptions, metricOrder, metricsFromVector, vectorFromMetrics } from './cvss';
 import type { AssetDetail, AttackPath, FindingPayload, FindingRecord, RecordEnvelope, SearchHit } from './types';
@@ -186,6 +186,7 @@ function FindingWorkspace() {
   const [noteAsset, setNoteAsset] = useState('');
   const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
   const [evidenceCaption, setEvidenceCaption] = useState('');
+  const [evidenceDragging, setEvidenceDragging] = useState(false);
   const [metrics, setMetrics] = useState(defaultMetrics());
   const [vector, setVector] = useState('');
   const [cvssNotes, setCvssNotes] = useState('');
@@ -269,6 +270,20 @@ function FindingWorkspace() {
     await loadDetail();
   }
 
+  function selectEvidenceFile(file: File | null) {
+    setEvidenceFile(file);
+    if (file && !evidenceCaption.trim()) {
+      setEvidenceCaption(file.name.replace(/\.[^.]+$/, ''));
+    }
+  }
+
+  function dropEvidenceFile(event: DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    setEvidenceDragging(false);
+    selectEvidenceFile(event.dataTransfer.files?.[0] || null);
+  }
+
   async function linkAsset() {
     if (!selectedId || !assetToLink) return;
     await api.linkFindingAsset(selectedId, assetToLink);
@@ -334,12 +349,12 @@ function FindingWorkspace() {
               <Select label="Severity" value={form.severity} onChange={(severity) => setForm({ ...form, severity })} options={['Unscored', 'INFO', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL']} />
               <TextArea label="Affected Scope" value={scopeText} onChange={setScopeText} compact />
               <TextArea label="References" value={refsText} onChange={setRefsText} compact />
-              <TextArea label="Summary" value={form.summary} onChange={(summary) => setForm({ ...form, summary })} />
-              <TextArea label="Technical Details" value={form.technical_details} onChange={(technical_details) => setForm({ ...form, technical_details })} />
-              <TextArea label="Impact" value={form.impact} onChange={(impact) => setForm({ ...form, impact })} />
-              <TextArea label="Remediation" value={form.remediation} onChange={(remediation) => setForm({ ...form, remediation })} />
-              <TextArea label="Validation" value={form.validation} onChange={(validation) => setForm({ ...form, validation })} />
-              <TextArea label="Open Questions" value={questionsText} onChange={setQuestionsText} />
+              <MarkdownTextArea label="Summary" value={form.summary} onChange={(summary) => setForm({ ...form, summary })} />
+              <MarkdownTextArea label="Technical Details" value={form.technical_details} onChange={(technical_details) => setForm({ ...form, technical_details })} />
+              <MarkdownTextArea label="Impact" value={form.impact} onChange={(impact) => setForm({ ...form, impact })} />
+              <MarkdownTextArea label="Remediation" value={form.remediation} onChange={(remediation) => setForm({ ...form, remediation })} />
+              <MarkdownTextArea label="Validation" value={form.validation} onChange={(validation) => setForm({ ...form, validation })} />
+              <MarkdownTextArea label="Open Questions" value={questionsText} onChange={setQuestionsText} />
             </div>
           </>
         )}
@@ -414,9 +429,26 @@ function FindingWorkspace() {
             </Panel>
 
             <Panel title="Evidence">
-              <input type="file" onChange={(event) => setEvidenceFile(event.target.files?.[0] || null)} />
+              <label
+                className={`drop-zone ${evidenceDragging ? 'active' : ''}`}
+                onDragEnter={(event) => {
+                  event.preventDefault();
+                  setEvidenceDragging(true);
+                }}
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  setEvidenceDragging(true);
+                }}
+                onDragLeave={() => setEvidenceDragging(false)}
+                onDrop={dropEvidenceFile}
+              >
+                <Upload size={20} />
+                <strong>{evidenceFile ? evidenceFile.name : 'Drop evidence here'}</strong>
+                <span>{evidenceFile ? formatBytes(evidenceFile.size) : 'Screenshot, proof file, or exported artifact'}</span>
+                <input type="file" onChange={(event) => selectEvidenceFile(event.target.files?.[0] || null)} />
+              </label>
               <input value={evidenceCaption} onChange={(event) => setEvidenceCaption(event.target.value)} placeholder="Caption" />
-              <button onClick={uploadEvidence}>Attach evidence</button>
+              <button onClick={uploadEvidence} disabled={!evidenceFile}>Attach evidence</button>
               <EvidenceCards records={detail.evidence || []} />
             </Panel>
 
@@ -1015,7 +1047,7 @@ function SettingsModule({ onLock }: { onLock: () => void }) {
   );
 }
 
-function Panel({ title, children }: { title: string; children: React.ReactNode }) {
+function Panel({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="panel">
       <h2>{title}</h2>
@@ -1030,6 +1062,30 @@ function TextArea({ label, value, onChange, compact = false }: { label: string; 
       <span>{label}</span>
       <textarea value={value} onChange={(event) => onChange(event.target.value)} />
     </label>
+  );
+}
+
+function MarkdownTextArea({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  const [mode, setMode] = useState<'write' | 'preview'>('write');
+  return (
+    <div className="markdown-field">
+      <div className="markdown-field-head">
+        <span>{label}</span>
+        <div className="mini-tabs" role="tablist" aria-label={`${label} mode`}>
+          <button type="button" className={mode === 'write' ? 'active' : ''} onClick={() => setMode('write')}>
+            Write
+          </button>
+          <button type="button" className={mode === 'preview' ? 'active' : ''} onClick={() => setMode('preview')}>
+            Preview
+          </button>
+        </div>
+      </div>
+      {mode === 'write' ? (
+        <textarea value={value} onChange={(event) => onChange(event.target.value)} />
+      ) : (
+        <div className="markdown-preview">{renderMarkdown(value)}</div>
+      )}
+    </div>
   );
 }
 
@@ -1181,6 +1237,117 @@ function listToCSV(values?: string[]) {
 
 function textToList(value: string) {
   return value.split(/\n|,/).map((item) => item.trim()).filter(Boolean);
+}
+
+function renderMarkdown(value: string) {
+  if (!value.trim()) return <p className="muted">No content yet.</p>;
+
+  const blocks: ReactNode[] = [];
+  const lines = value.replace(/\r\n/g, '\n').split('\n');
+  let paragraph: string[] = [];
+  let unordered: string[] = [];
+  let ordered: string[] = [];
+  let code: string[] = [];
+  let inCode = false;
+
+  const flushParagraph = () => {
+    if (!paragraph.length) return;
+    blocks.push(<p key={`p-${blocks.length}`}>{formatInlineMarkdown(paragraph.join(' '))}</p>);
+    paragraph = [];
+  };
+  const flushUnordered = () => {
+    if (!unordered.length) return;
+    blocks.push(<ul key={`ul-${blocks.length}`}>{unordered.map((item, index) => <li key={index}>{formatInlineMarkdown(item)}</li>)}</ul>);
+    unordered = [];
+  };
+  const flushOrdered = () => {
+    if (!ordered.length) return;
+    blocks.push(<ol key={`ol-${blocks.length}`}>{ordered.map((item, index) => <li key={index}>{formatInlineMarkdown(item)}</li>)}</ol>);
+    ordered = [];
+  };
+  const flushTextBlocks = () => {
+    flushParagraph();
+    flushUnordered();
+    flushOrdered();
+  };
+
+  lines.forEach((line) => {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('```')) {
+      if (inCode) {
+        blocks.push(<pre key={`code-${blocks.length}`}><code>{code.join('\n')}</code></pre>);
+        code = [];
+        inCode = false;
+      } else {
+        flushTextBlocks();
+        inCode = true;
+      }
+      return;
+    }
+    if (inCode) {
+      code.push(line);
+      return;
+    }
+    if (!trimmed) {
+      flushTextBlocks();
+      return;
+    }
+    const heading = /^(#{1,3})\s+(.+)$/.exec(trimmed);
+    if (heading) {
+      flushTextBlocks();
+      const content = formatInlineMarkdown(heading[2]);
+      if (heading[1].length === 1) blocks.push(<h3 key={`h-${blocks.length}`}>{content}</h3>);
+      else if (heading[1].length === 2) blocks.push(<h4 key={`h-${blocks.length}`}>{content}</h4>);
+      else blocks.push(<h5 key={`h-${blocks.length}`}>{content}</h5>);
+      return;
+    }
+    const bullet = /^[-*]\s+(.+)$/.exec(trimmed);
+    if (bullet) {
+      flushParagraph();
+      flushOrdered();
+      unordered.push(bullet[1]);
+      return;
+    }
+    const numbered = /^\d+\.\s+(.+)$/.exec(trimmed);
+    if (numbered) {
+      flushParagraph();
+      flushUnordered();
+      ordered.push(numbered[1]);
+      return;
+    }
+    if (trimmed.startsWith('>')) {
+      flushTextBlocks();
+      blocks.push(<blockquote key={`quote-${blocks.length}`}>{formatInlineMarkdown(trimmed.replace(/^>\s?/, ''))}</blockquote>);
+      return;
+    }
+    flushUnordered();
+    flushOrdered();
+    paragraph.push(trimmed);
+  });
+
+  if (inCode) blocks.push(<pre key={`code-${blocks.length}`}><code>{code.join('\n')}</code></pre>);
+  flushTextBlocks();
+  return blocks;
+}
+
+function formatInlineMarkdown(value: string) {
+  return value.split(/(`[^`]+`|\*\*[^*]+\*\*)/g).filter(Boolean).map((part, index) => {
+    if (part.startsWith('`') && part.endsWith('`')) return <code key={index}>{part.slice(1, -1)}</code>;
+    if (part.startsWith('**') && part.endsWith('**')) return <strong key={index}>{part.slice(2, -2)}</strong>;
+    return <span key={index}>{part}</span>;
+  });
+}
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ['KB', 'MB', 'GB'];
+  let value = bytes / 1024;
+  let index = 0;
+  while (value >= 1024 && index < units.length - 1) {
+    value /= 1024;
+    index += 1;
+  }
+  return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[index]}`;
 }
 
 function recordTitle(record: RecordEnvelope) {

@@ -32,7 +32,8 @@ The primary workflow is the local web UI started with `mnemox serve`. The CLI an
 - Link/unlink affected assets.
 - CVSS v4.0 Base calculator with live vector and score.
 - Add notes tied to a finding.
-- Upload evidence tied to a finding.
+- Upload evidence tied to a finding, including drag-and-drop evidence attach.
+- Inline Markdown preview for long-form finding fields.
 - Render copy-ready Markdown Finding Packets.
 
 ### Assets
@@ -82,11 +83,9 @@ The primary workflow is the local web UI started with `mnemox serve`. The CLI an
 
 ## Near-Term Roadmap Order
 
-1. Drag-and-drop evidence upload.
-2. Inline Markdown preview for long-form finding fields.
-3. Asset merge/deduplication.
-4. Additional importers: Burp, Nessus, BloodHound.
-5. Evidence citation bundles.
-6. Local semantic search with encrypted embedding cache.
-7. Attack path graph visualization.
-8. Release polish: signed artifacts, Homebrew tap, docs site.
+1. Asset merge/deduplication.
+2. Additional importers: Burp, Nessus, BloodHound.
+3. Evidence citation bundles.
+4. Local semantic search with encrypted embedding cache.
+5. Attack path graph visualization.
+6. Release polish: signed artifacts, Homebrew tap, docs site.
