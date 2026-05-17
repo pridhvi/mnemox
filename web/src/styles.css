@@ -555,6 +555,21 @@ label.compact textarea {
   align-items: center;
 }
 
+.table-row.asset-row {
+  width: 100%;
+  min-height: auto;
+  border-width: 0 0 1px;
+  border-radius: 0;
+  background: transparent;
+  justify-content: stretch;
+  padding: 12px 14px;
+  text-align: left;
+}
+
+.table-row.asset-row.selected {
+  background: #16212b;
+}
+
 .table-row:last-child {
   border-bottom: 0;
 }
@@ -581,9 +596,50 @@ label.compact textarea {
   align-content: start;
 }
 
+.asset-detail {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.record-head {
+  display: grid;
+  gap: 4px;
+}
+
+.record-head span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.relation-list {
+  display: grid;
+  gap: 8px;
+}
+
+.relation-list div {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgba(9, 13, 18, 0.55);
+  padding: 10px;
+  display: grid;
+  gap: 4px;
+}
+
+.relation-list span {
+  color: #b4c1cf;
+  font-size: 12px;
+}
+
 .search-bar {
   display: grid;
   grid-template-columns: 1fr auto;
+  gap: 10px;
+}
+
+.filter-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 220px) minmax(260px, 1fr);
   gap: 10px;
 }
 
@@ -659,7 +715,8 @@ label.compact textarea {
   }
 
   .detail-pane,
-  .form-grid {
+  .form-grid,
+  .filter-row {
     grid-template-columns: 1fr;
   }
 

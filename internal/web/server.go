@@ -89,6 +89,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/findings/{id}/packet", s.requireUnlock(s.handleFindingPacket))
 	mux.HandleFunc("GET /api/assets", s.requireUnlock(s.handleListAssets))
 	mux.HandleFunc("POST /api/assets", s.requireUnlock(s.handleCreateAsset))
+	mux.HandleFunc("GET /api/assets/{id}", s.requireUnlock(s.handleGetAsset))
 	mux.HandleFunc("POST /api/import/nmap", s.requireUnlock(s.handleImportNmap))
 	mux.HandleFunc("POST /api/import/nuclei", s.requireUnlock(s.handleImportNuclei))
 	mux.HandleFunc("POST /api/import/screenshots", s.requireUnlock(s.handleImportScreenshots))
@@ -209,7 +210,13 @@ func (s *Server) handleLock(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleListFindings(w http.ResponseWriter, r *http.Request) {
 	v := s.currentVault()
-	records, err := v.Records("finding")
+	var records []vault.Record
+	var err error
+	if assetID := r.URL.Query().Get("asset_id"); assetID != "" {
+		records, err = v.LinkedFrom(assetID, "affects_asset")
+	} else {
+		records, err = v.Records("finding")
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -498,6 +505,27 @@ func (s *Server) handleCreateAsset(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, recordResponse(rec))
 }
 
+func (s *Server) handleGetAsset(w http.ResponseWriter, r *http.Request) {
+	v := s.currentVault()
+	rec, err := v.GetRecord(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if rec.Kind != "asset" {
+		writeError(w, http.StatusBadRequest, "record is not an asset")
+		return
+	}
+	findings, _ := v.LinkedFrom(rec.ID, "affects_asset")
+	evidence, _ := v.LinkedFrom(rec.ID, "evidence_asset")
+	credentials, _ := v.LinkedFrom(rec.ID, "credential_asset")
+	response := recordResponse(rec)
+	response["findings"] = recordList(findings, false)
+	response["evidence"] = recordList(evidence, false)
+	response["credentials"] = recordList(credentials, true)
+	writeJSON(w, http.StatusOK, response)
+}
+
 func (s *Server) handleImportNmap(w http.ResponseWriter, r *http.Request) {
 	s.handleImportFile(w, r, importer.NmapXML)
 }
@@ -709,8 +737,24 @@ func (s *Server) handleLinkCredentialAsset(w http.ResponseWriter, r *http.Reques
 
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query().Get("q")
+	kind := r.URL.Query().Get("kind")
+	assetID := r.URL.Query().Get("asset_id")
 	limit := 20
-	hits, err := s.currentVault().Search(query, limit)
+	v := s.currentVault()
+	var hits []vault.SearchHit
+	var err error
+	if assetID != "" {
+		records, collectErr := s.assetRelatedRecords(assetID, kind)
+		if collectErr != nil {
+			writeError(w, http.StatusBadRequest, collectErr.Error())
+			return
+		}
+		hits = searchRecordHits(records, query, limit)
+	} else if kind != "" && kind != "all" {
+		hits, err = v.SearchByKind(query, kind, limit)
+	} else {
+		hits, err = v.Search(query, limit)
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -748,6 +792,99 @@ func (s *Server) linkTypedRecords(srcID, dstID, srcKind, dstKind, relation strin
 		return fmt.Errorf("target record is %s, expected %s", dst.Kind, dstKind)
 	}
 	return v.AddLink(srcID, dstID, relation)
+}
+
+func (s *Server) assetRelatedRecords(assetID, kind string) ([]vault.Record, error) {
+	v := s.currentVault()
+	asset, err := v.GetRecord(assetID)
+	if err != nil {
+		return nil, err
+	}
+	if asset.Kind != "asset" {
+		return nil, fmt.Errorf("record is not an asset")
+	}
+	type relation struct {
+		kind string
+		name string
+	}
+	relations := []relation{
+		{kind: "finding", name: "affects_asset"},
+		{kind: "evidence", name: "evidence_asset"},
+		{kind: "credential", name: "credential_asset"},
+	}
+	if kind == "" || kind == "all" || kind == "asset" {
+		relations = append([]relation{{kind: "asset", name: ""}}, relations...)
+	}
+	var out []vault.Record
+	for _, rel := range relations {
+		if kind != "" && kind != "all" && kind != rel.kind {
+			continue
+		}
+		if rel.kind == "asset" {
+			out = append(out, asset)
+			continue
+		}
+		records, err := v.LinkedFrom(assetID, rel.name)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, records...)
+	}
+	return out, nil
+}
+
+func searchRecordHits(records []vault.Record, query string, limit int) []vault.SearchHit {
+	if strings.TrimSpace(query) != "" {
+		return vault.SearchRecords(records, query, limit)
+	}
+	hits := make([]vault.SearchHit, 0, len(records))
+	for _, rec := range records {
+		excerpt := relationshipExcerpt(rec)
+		if rec.Kind == "credential" {
+			excerpt = redactSecretFragments(excerpt)
+		}
+		hits = append(hits, vault.SearchHit{
+			Kind:    rec.Kind,
+			ID:      rec.ID,
+			Title:   vault.Title(rec.Payload),
+			Excerpt: excerpt,
+			Score:   0,
+		})
+	}
+	if limit > 0 && len(hits) > limit {
+		return hits[:limit]
+	}
+	return hits
+}
+
+func relationshipExcerpt(rec vault.Record) string {
+	switch rec.Kind {
+	case "finding":
+		return strings.TrimSpace(strings.Join([]string{
+			asString(rec.Payload["severity"]),
+			asString(rec.Payload["status"]),
+			asString(rec.Payload["summary"]),
+		}, " "))
+	case "evidence":
+		return strings.TrimSpace(strings.Join([]string{
+			asString(rec.Payload["kind"]),
+			asString(rec.Payload["caption"]),
+			asString(rec.Payload["original_path"]),
+		}, " "))
+	case "credential":
+		return strings.TrimSpace(strings.Join([]string{
+			asString(rec.Payload["username"]),
+			asString(rec.Payload["scope"]),
+		}, " "))
+	case "asset":
+		return strings.TrimSpace(strings.Join([]string{
+			asString(rec.Payload["type"]),
+			asString(rec.Payload["value"]),
+			asString(rec.Payload["notes"]),
+		}, " "))
+	default:
+		return vault.Title(rec.Payload)
+	}
 }
 
 func spaHandler() http.Handler {

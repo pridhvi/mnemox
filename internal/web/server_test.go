@@ -70,6 +70,14 @@ func TestWebAPIWorkflowAndCredentialRedaction(t *testing.T) {
 	}, http.StatusCreated)
 
 	evidenceRecord := uploadEvidence(t, ts.URL+"/api/findings/"+findingID+"/evidence")
+	assetDetail := getJSON(t, ts.URL+"/api/assets/"+assetID, http.StatusOK)
+	if len(assetDetail["findings"].([]any)) != 1 || len(assetDetail["evidence"].([]any)) != 1 {
+		t.Fatalf("expected asset relation context: %#v", assetDetail)
+	}
+	filteredFindings := getJSON(t, ts.URL+"/api/findings?asset_id="+assetID, http.StatusOK)
+	if len(filteredFindings["items"].([]any)) != 1 {
+		t.Fatalf("expected asset-filtered finding: %#v", filteredFindings)
+	}
 	previewReq, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/evidence/"+evidenceRecord["id"].(string)+"/preview", nil)
 	previewResp, err := http.DefaultClient.Do(previewReq)
 	if err != nil {
@@ -93,12 +101,17 @@ func TestWebAPIWorkflowAndCredentialRedaction(t *testing.T) {
 		t.Fatalf("packet missing finding title: %#v", packet)
 	}
 
-	postJSON(t, ts.URL+"/api/credentials", map[string]any{
+	credential := postJSON(t, ts.URL+"/api/credentials", map[string]any{
 		"name":     "svc_backup",
 		"username": "svc_backup",
 		"secret":   "super-secret-value",
 		"scope":    "domain",
 	}, http.StatusCreated)
+	postJSON(t, ts.URL+"/api/credentials/"+credential["id"].(string)+"/assets", map[string]any{"asset_id": assetID}, http.StatusOK)
+	assetDetail = getJSON(t, ts.URL+"/api/assets/"+assetID, http.StatusOK)
+	if len(assetDetail["credentials"].([]any)) != 1 {
+		t.Fatalf("expected linked credential in asset detail: %#v", assetDetail)
+	}
 	credentials := getJSON(t, ts.URL+"/api/credentials", http.StatusOK)
 	encoded, _ := json.Marshal(credentials)
 	if strings.Contains(string(encoded), "super-secret-value") {
@@ -108,6 +121,15 @@ func TestWebAPIWorkflowAndCredentialRedaction(t *testing.T) {
 	encoded, _ = json.Marshal(search)
 	if strings.Contains(string(encoded), "super-secret-value") || strings.Contains(string(encoded), "svc_backup") {
 		t.Fatalf("credential secret was searchable: %s", encoded)
+	}
+	relatedSearch := getJSON(t, ts.URL+"/api/search?asset_id="+assetID+"&kind=finding", http.StatusOK)
+	if len(relatedSearch["items"].([]any)) != 1 {
+		t.Fatalf("expected linked finding search result: %#v", relatedSearch)
+	}
+	relatedCredentialSearch := getJSON(t, ts.URL+"/api/search?asset_id="+assetID+"&kind=credential", http.StatusOK)
+	encoded, _ = json.Marshal(relatedCredentialSearch)
+	if strings.Contains(string(encoded), "super-secret-value") || !strings.Contains(string(encoded), "svc_backup") {
+		t.Fatalf("credential relationship search redaction failed: %s", encoded)
 	}
 }
 

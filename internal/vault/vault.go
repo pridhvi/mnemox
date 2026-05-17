@@ -428,7 +428,11 @@ func (v *Vault) SearchByKind(query, kind string, limit int) ([]SearchHit, error)
 	if err != nil {
 		return nil, err
 	}
-	return convertSearchHits(search.Ranked(searchRecords(records), query, limit)), nil
+	return SearchRecords(records, query, limit), nil
+}
+
+func SearchRecords(records []Record, query string, limit int) []SearchHit {
+	return convertSearchHits(search.Ranked(searchRecords(records), query, limit))
 }
 
 func searchRecords(records []Record) []search.Record {

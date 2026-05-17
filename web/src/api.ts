@@ -1,4 +1,4 @@
-import type { FindingPayload, FindingRecord, RecordEnvelope, SearchHit } from './types';
+import type { AssetDetail, FindingPayload, FindingRecord, RecordEnvelope, SearchHit } from './types';
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(path, {
@@ -22,7 +22,8 @@ export const api = {
   unlock: (passphrase: string) =>
     request<{ unlocked: boolean }>('/api/unlock', { method: 'POST', body: JSON.stringify({ passphrase }) }),
   lock: () => request<{ unlocked: boolean }>('/api/lock', { method: 'POST' }),
-  listFindings: () => request<{ items: FindingRecord[] }>('/api/findings'),
+  listFindings: (assetId = '') =>
+    request<{ items: FindingRecord[] }>(`/api/findings${assetId ? `?asset_id=${encodeURIComponent(assetId)}` : ''}`),
   createFinding: (payload: FindingPayload) =>
     request<FindingRecord>('/api/findings', { method: 'POST', body: JSON.stringify(payload) }),
   getFinding: (id: string) => request<FindingRecord>(`/api/findings/${id}`),
@@ -40,6 +41,7 @@ export const api = {
     request(`/api/findings/${id}/cvss`, { method: 'POST', body: JSON.stringify(payload) }),
   packet: (id: string) => request<{ markdown: string }>(`/api/findings/${id}/packet`),
   assets: () => request<{ items: RecordEnvelope[] }>('/api/assets'),
+  asset: (id: string) => request<AssetDetail>(`/api/assets/${id}`),
   createAsset: (payload: { name: string; type: string; value: string; notes: string; tags: string[] }) =>
     request<RecordEnvelope>('/api/assets', { method: 'POST', body: JSON.stringify(payload) }),
   importNmap: (form: FormData) => request<{ assets: number; findings: number; evidence: number }>('/api/import/nmap', { method: 'POST', body: form }),
@@ -52,6 +54,12 @@ export const api = {
   createCredential: (payload: { name: string; username: string; secret: string; scope: string; tags: string[] }) =>
     request<RecordEnvelope>('/api/credentials', { method: 'POST', body: JSON.stringify(payload) }),
   revealCredential: (id: string) => request<{ secret: string }>(`/api/credentials/${id}/secret`),
-  search: (query: string) => request<{ items: SearchHit[] }>(`/api/search?q=${encodeURIComponent(query)}`),
+  search: (query: string, filters: { kind?: string; assetId?: string } = {}) => {
+    const params = new URLSearchParams();
+    if (query) params.set('q', query);
+    if (filters.kind && filters.kind !== 'all') params.set('kind', filters.kind);
+    if (filters.assetId) params.set('asset_id', filters.assetId);
+    return request<{ items: SearchHit[] }>(`/api/search?${params.toString()}`);
+  },
   settings: () => request<{ vault_path: string; server: string; unlocked: boolean }>('/api/settings'),
 };

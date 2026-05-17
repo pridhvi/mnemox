@@ -18,7 +18,7 @@ import {
 import { type ElementType, type FormEvent, useCallback, useEffect, useState } from 'react';
 import { api } from './api';
 import { defaultMetrics, metricLabels, metricOptions, metricOrder, metricsFromVector, vectorFromMetrics } from './cvss';
-import type { FindingPayload, FindingRecord, RecordEnvelope, SearchHit } from './types';
+import type { AssetDetail, FindingPayload, FindingRecord, RecordEnvelope, SearchHit } from './types';
 
 type Module = 'findings' | 'assets' | 'evidence' | 'notes' | 'credentials' | 'search' | 'paths' | 'packets' | 'settings';
 
@@ -476,6 +476,8 @@ function EvidenceModule() {
 
 function AssetsModule() {
   const [items, setItems] = useState<RecordEnvelope[]>([]);
+  const [selectedId, setSelectedId] = useState('');
+  const [detail, setDetail] = useState<AssetDetail | null>(null);
   const [form, setForm] = useState({ name: '', type: 'host', value: '', notes: '', tags: '' });
   const [importMessage, setImportMessage] = useState('');
   const [screenshotPath, setScreenshotPath] = useState('');
@@ -483,16 +485,26 @@ function AssetsModule() {
   async function load() {
     const response = await api.assets();
     setItems(response.items);
+    setSelectedId((current) => current || response.items[0]?.id || '');
   }
 
   useEffect(() => {
     load();
   }, []);
 
+  useEffect(() => {
+    if (!selectedId) {
+      setDetail(null);
+      return;
+    }
+    api.asset(selectedId).then(setDetail);
+  }, [selectedId]);
+
   async function create(event: FormEvent) {
     event.preventDefault();
-    await api.createAsset({ ...form, tags: textToList(form.tags) });
+    const created = await api.createAsset({ ...form, tags: textToList(form.tags) });
     setForm({ name: '', type: 'host', value: '', notes: '', tags: '' });
+    setSelectedId(created.id);
     await load();
   }
 
@@ -517,13 +529,27 @@ function AssetsModule() {
         <h1>Assets</h1>
         <div className="table">
           {items.map((item) => (
-            <div className="table-row" key={item.id}>
+            <button className={`table-row asset-row ${selectedId === item.id ? 'selected' : ''}`} key={item.id} onClick={() => setSelectedId(item.id)}>
               <strong>{String(item.payload.name)}</strong>
               <span>{String(item.payload.type || 'asset')}</span>
               <small>{String(item.payload.value || '')}</small>
-            </div>
+            </button>
           ))}
         </div>
+        {detail && (
+          <div className="asset-detail">
+            <Panel title="Asset Context">
+              <div className="record-head">
+                <strong>{assetLabel(detail)}</strong>
+                <span>{String(detail.payload.type || 'asset')} · {String(detail.payload.value || '')}</span>
+              </div>
+              {detail.payload.notes ? <p className="muted">{String(detail.payload.notes)}</p> : null}
+            </Panel>
+            <RelationPanel title="Linked Findings" records={detail.findings || []} empty="No findings linked to this asset yet." />
+            <RelationPanel title="Linked Evidence" records={detail.evidence || []} empty="No evidence linked to this asset yet." />
+            <RelationPanel title="Linked Credentials" records={detail.credentials || []} empty="No credentials linked to this asset yet." />
+          </div>
+        )}
       </div>
       <div className="stack">
         <form className="side-form" onSubmit={create}>
@@ -607,9 +633,15 @@ function CredentialsModule() {
 
 function SearchModule() {
   const [query, setQuery] = useState('');
+  const [kind, setKind] = useState('all');
+  const [assetId, setAssetId] = useState('');
+  const [assets, setAssets] = useState<RecordEnvelope[]>([]);
   const [items, setItems] = useState<SearchHit[]>([]);
+  useEffect(() => {
+    api.assets().then((response) => setAssets(response.items));
+  }, []);
   async function runSearch() {
-    const response = await api.search(query);
+    const response = await api.search(query, { kind, assetId });
     setItems(response.items);
   }
   return (
@@ -618,6 +650,19 @@ function SearchModule() {
       <div className="search-bar">
         <input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && runSearch()} placeholder="Search findings, notes, evidence, credential metadata" />
         <button className="primary" onClick={runSearch}>Search</button>
+      </div>
+      <div className="filter-row">
+        <select value={kind} onChange={(event) => setKind(event.target.value)}>
+          {['all', 'finding', 'evidence', 'credential', 'asset', 'note'].map((option) => (
+            <option key={option} value={option}>{option}</option>
+          ))}
+        </select>
+        <select value={assetId} onChange={(event) => setAssetId(event.target.value)}>
+          <option value="">Any asset relationship</option>
+          {assets.map((asset) => (
+            <option key={asset.id} value={asset.id}>{assetLabel(asset)}</option>
+          ))}
+        </select>
       </div>
       <div className="table">
         {items.map((item) => (
@@ -646,22 +691,33 @@ function AttackPathsModule() {
 
 function PacketsModule() {
   const [findings, setFindings] = useState<FindingRecord[]>([]);
+  const [assets, setAssets] = useState<RecordEnvelope[]>([]);
+  const [assetId, setAssetId] = useState('');
   const [selected, setSelected] = useState('');
   const [markdown, setMarkdown] = useState('');
   useEffect(() => {
-    api.listFindings().then((response) => {
-      setFindings(response.items);
-      setSelected(response.items[0]?.id || '');
-    });
+    api.assets().then((response) => setAssets(response.items));
   }, []);
   useEffect(() => {
+    api.listFindings(assetId).then((response) => {
+      setFindings(response.items);
+      setSelected((current) => (response.items.some((finding) => finding.id === current) ? current : response.items[0]?.id || ''));
+    });
+  }, [assetId]);
+  useEffect(() => {
     if (selected) api.packet(selected).then((response) => setMarkdown(response.markdown));
+    else setMarkdown('');
   }, [selected]);
   return (
     <section className="module-page two-column">
       <div>
         <h1>Packets</h1>
+        <select value={assetId} onChange={(event) => setAssetId(event.target.value)}>
+          <option value="">All assets</option>
+          {assets.map((asset) => <option key={asset.id} value={asset.id}>{assetLabel(asset)}</option>)}
+        </select>
         <select value={selected} onChange={(event) => setSelected(event.target.value)}>
+          <option value="">Select finding</option>
           {findings.map((finding) => <option key={finding.id} value={finding.id}>{finding.payload.title}</option>)}
         </select>
         <div className="packet-actions">
@@ -737,6 +793,26 @@ function MiniList({ records, primary }: { records: RecordEnvelope[]; primary: st
   );
 }
 
+function RelationPanel({ title, records, empty }: { title: string; records: RecordEnvelope[]; empty: string }) {
+  return (
+    <Panel title={`${title} (${records.length})`}>
+      {records.length === 0 ? (
+        <p className="muted">{empty}</p>
+      ) : (
+        <div className="relation-list">
+          {records.map((record) => (
+            <div key={record.id}>
+              <strong>{recordTitle(record)}</strong>
+              <span>{relationSummary(record)}</span>
+              <small>{record.kind} · {record.id.slice(0, 8)}</small>
+            </div>
+          ))}
+        </div>
+      )}
+    </Panel>
+  );
+}
+
 function EvidenceCards({ records }: { records: RecordEnvelope[] }) {
   return (
     <div className="evidence-grid compact-grid">
@@ -781,6 +857,35 @@ function listToText(values?: string[]) {
 
 function textToList(value: string) {
   return value.split(/\n|,/).map((item) => item.trim()).filter(Boolean);
+}
+
+function recordTitle(record: RecordEnvelope) {
+  return String(
+    record.payload.title ||
+      record.payload.name ||
+      record.payload.caption ||
+      record.payload.username ||
+      record.payload.original_path ||
+      record.payload.text ||
+      record.id,
+  );
+}
+
+function assetLabel(record: RecordEnvelope) {
+  return String(record.payload.name || record.payload.value || record.id);
+}
+
+function relationSummary(record: RecordEnvelope) {
+  if (record.kind === 'finding') {
+    return [record.payload.severity, record.payload.status, record.payload.summary].filter(Boolean).join(' · ');
+  }
+  if (record.kind === 'evidence') {
+    return [record.payload.kind, record.payload.caption, record.payload.original_path].filter(Boolean).join(' · ');
+  }
+  if (record.kind === 'credential') {
+    return [record.payload.username, record.payload.scope].filter(Boolean).join(' · ');
+  }
+  return [record.payload.type, record.payload.value].filter(Boolean).join(' · ');
 }
 
 function formatDate(value: string) {

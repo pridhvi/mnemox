@@ -37,6 +37,12 @@ export type FindingRecord = RecordEnvelope<FindingPayload> & {
   packet_markdown?: string;
 };
 
+export type AssetDetail = RecordEnvelope & {
+  findings?: FindingRecord[];
+  evidence?: RecordEnvelope[];
+  credentials?: RecordEnvelope[];
+};
+
 export type SearchHit = {
   Kind: string;
   ID: string;
