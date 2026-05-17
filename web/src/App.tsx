@@ -976,13 +976,14 @@ function SearchModule() {
   const [query, setQuery] = useState('');
   const [kind, setKind] = useState('all');
   const [assetId, setAssetId] = useState('');
+  const [mode, setMode] = useState<'keyword' | 'semantic'>('keyword');
   const [assets, setAssets] = useState<RecordEnvelope[]>([]);
   const [items, setItems] = useState<SearchHit[]>([]);
   useEffect(() => {
     api.assets().then((response) => setAssets(response.items));
   }, []);
   async function runSearch() {
-    const response = await api.search(query, { kind, assetId });
+    const response = await api.search(query, { kind, assetId, mode });
     setItems(response.items);
   }
   return (
@@ -993,6 +994,10 @@ function SearchModule() {
         <button className="primary" onClick={runSearch}>Search</button>
       </div>
       <div className="filter-row">
+        <div className="segmented compact" role="tablist" aria-label="Search mode">
+          <button type="button" className={mode === 'keyword' ? 'active' : ''} onClick={() => setMode('keyword')}>Keyword</button>
+          <button type="button" className={mode === 'semantic' ? 'active' : ''} onClick={() => setMode('semantic')}>Semantic</button>
+        </div>
         <select value={kind} onChange={(event) => setKind(event.target.value)}>
           {['all', 'finding', 'evidence', 'credential', 'asset', 'note'].map((option) => (
             <option key={option} value={option}>{option}</option>

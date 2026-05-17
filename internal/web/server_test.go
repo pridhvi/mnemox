@@ -167,9 +167,23 @@ func TestWebAPIWorkflowAndCredentialRedaction(t *testing.T) {
 	if strings.Contains(string(encoded), "super-secret-value") || strings.Contains(string(encoded), "svc_backup") {
 		t.Fatalf("credential secret was searchable: %s", encoded)
 	}
+	semanticSearch := getJSON(t, ts.URL+"/api/search?q=login+permission+bypass&mode=semantic", http.StatusOK)
+	encoded, _ = json.Marshal(semanticSearch)
+	if !strings.Contains(string(encoded), "Jenkins anonymous read") {
+		t.Fatalf("expected semantic search to find related auth issue: %s", encoded)
+	}
+	semanticSecretSearch := getJSON(t, ts.URL+"/api/search?q=super-secret-value&mode=semantic", http.StatusOK)
+	encoded, _ = json.Marshal(semanticSecretSearch)
+	if strings.Contains(string(encoded), "super-secret-value") || strings.Contains(string(encoded), "svc_backup") {
+		t.Fatalf("credential secret was semantically searchable: %s", encoded)
+	}
 	relatedSearch := getJSON(t, ts.URL+"/api/search?asset_id="+assetID+"&kind=finding", http.StatusOK)
 	if len(relatedSearch["items"].([]any)) != 1 {
 		t.Fatalf("expected linked finding search result: %#v", relatedSearch)
+	}
+	relatedSemanticSearch := getJSON(t, ts.URL+"/api/search?asset_id="+assetID+"&kind=finding&q=login+permission+bypass&mode=semantic", http.StatusOK)
+	if len(relatedSemanticSearch["items"].([]any)) != 1 {
+		t.Fatalf("expected linked semantic finding search result: %#v", relatedSemanticSearch)
 	}
 	relatedCredentialSearch := getJSON(t, ts.URL+"/api/search?asset_id="+assetID+"&kind=credential", http.StatusOK)
 	encoded, _ = json.Marshal(relatedCredentialSearch)

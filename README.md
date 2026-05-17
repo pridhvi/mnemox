@@ -71,7 +71,7 @@ By default, Mnemox uses `.mnemox/` in the current directory. Set
 - `import nessus`: import Nessus XML report items as findings and assets.
 - `import bloodhound`: import BloodHound JSON graph/path exports as assets and relationship notes.
 - `import screenshots`: import a folder of screenshots as evidence.
-- `ask`: local evidence recall over decrypted vault records.
+- `ask`: local evidence recall over decrypted vault records. Add `--semantic` to use the encrypted local semantic index.
 - `cvss score`: calculate and store a CVSS v4.0 Base score.
 - `packet build`: render a cited Markdown Finding Packet.
 - `packet bundle`: render a prompt-ready Evidence Citation Bundle.
@@ -85,10 +85,10 @@ Mnemox derives a vault key from `MNEMOX_PASSPHRASE` using Argon2id. Record
 payloads and evidence blobs are encrypted with XChaCha20-Poly1305. Keep the
 passphrase safe; lost passphrases cannot be recovered.
 
-This MVP performs local keyword-style recall over decrypted records at runtime.
-It does not send data to an external AI service. Search uses local ranked
-matching over decrypted records at runtime, with credential secrets excluded
-from searchable material.
+This MVP performs local recall over decrypted records at runtime. It does not
+send data to an external AI service. Search supports ranked keyword/fuzzy
+matching and an optional local semantic mode backed by an encrypted vault cache,
+with credential secrets excluded from searchable material.
 
 ## Backlog And Releases
 

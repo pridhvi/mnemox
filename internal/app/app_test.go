@@ -44,9 +44,14 @@ func TestSearchFindsEncryptedRecordContents(t *testing.T) {
 	dir := t.TempDir()
 	run(t, bin, dir, "init", "--name", "ACME")
 	run(t, bin, dir, "finding", "add", "Weak TLS", "--summary", "TLS 1.0 was enabled.")
+	run(t, bin, dir, "finding", "add", "Jenkins anonymous read", "--summary", "Jenkins allowed unauthenticated read access.")
 	out := run(t, bin, dir, "ask", "TLS enabled")
 	if !strings.Contains(out, "Weak TLS") {
 		t.Fatalf("expected search result, got %s", out)
+	}
+	semantic := run(t, bin, dir, "ask", "--semantic", "login permission bypass")
+	if !strings.Contains(semantic, "Jenkins anonymous read") {
+		t.Fatalf("expected semantic search result, got %s", semantic)
 	}
 }
 

@@ -12,7 +12,7 @@ The primary workflow is the local web UI started with `mnemox serve`. The CLI an
 - Vault: local encrypted records and blobs under `.mnemox/`.
 - Frontend: React and TypeScript built as a static SPA.
 - Distribution: compiled frontend embedded into the Go binary.
-- Search: local ranked keyword/fuzzy search over decrypted records at runtime.
+- Search: local ranked keyword/fuzzy search plus optional local semantic search with an encrypted vault cache.
 
 ## Security Model
 
@@ -69,6 +69,7 @@ The primary workflow is the local web UI started with `mnemox serve`. The CLI an
 - Search findings, notes, evidence metadata, asset metadata, and credential metadata.
 - Credential secrets are excluded.
 - Filters exist for kind and asset relationship.
+- Optional semantic mode uses deterministic local embeddings stored only in the encrypted vault metadata cache.
 - Evidence citation bundles can render prompt-ready, cited Markdown for a finding and optional asset scope.
 
 ### Attack Paths
@@ -88,6 +89,5 @@ The primary workflow is the local web UI started with `mnemox serve`. The CLI an
 
 ## Near-Term Roadmap Order
 
-1. Local semantic search with encrypted embedding cache.
-2. Attack path graph visualization.
-3. Release polish: signed artifacts, Homebrew tap, docs site.
+1. Attack path graph visualization.
+2. Release polish: signed artifacts, Homebrew tap, docs site.

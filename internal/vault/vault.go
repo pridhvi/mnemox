@@ -1,12 +1,15 @@
 package vault
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -37,6 +40,18 @@ type Vault struct {
 	DB      *sql.DB
 	box     *cipherBox
 	BlobDir string
+}
+
+const (
+	semanticIndexMetaKey = "semantic_index_v1"
+	semanticIndexVersion = 2
+)
+
+type semanticIndexCache struct {
+	Version     int                       `json:"version"`
+	Fingerprint string                    `json:"fingerprint"`
+	BuiltAt     string                    `json:"built_at"`
+	Items       []search.SemanticDocument `json:"items"`
 }
 
 func DefaultPath() string {
@@ -203,6 +218,30 @@ func (v *Vault) Verify() error {
 		return errors.New("invalid Mnemox passphrase")
 	}
 	return nil
+}
+
+func (v *Vault) SetMetaJSON(key string, payload any) error {
+	token, err := v.box.encryptJSON(payload)
+	if err != nil {
+		return err
+	}
+	_, err = v.DB.Exec(`INSERT OR REPLACE INTO meta(key, value) VALUES(?, ?)`, key, token)
+	return err
+}
+
+func (v *Vault) GetMetaJSON(key string, target any) (bool, error) {
+	var token []byte
+	err := v.DB.QueryRow(`SELECT value FROM meta WHERE key = ?`, key).Scan(&token)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if err := v.box.decryptJSON(token, target); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (v *Vault) AddRecord(kind string, payload map[string]any) (string, error) {
@@ -439,8 +478,61 @@ func (v *Vault) SearchByKind(query, kind string, limit int) ([]SearchHit, error)
 	return SearchRecords(records, query, limit), nil
 }
 
+func (v *Vault) SemanticSearch(query, kind string, limit int) ([]SearchHit, error) {
+	records, err := v.Records("")
+	if err != nil {
+		return nil, err
+	}
+	index, err := v.semanticIndex(records)
+	if err != nil {
+		return nil, err
+	}
+	return convertSearchHits(search.SearchSemanticIndex(index, query, kind, limit)), nil
+}
+
 func SearchRecords(records []Record, query string, limit int) []SearchHit {
 	return convertSearchHits(search.Ranked(searchRecords(records), query, limit))
+}
+
+func SemanticSearchRecords(records []Record, query string, limit int) []SearchHit {
+	return convertSearchHits(search.SemanticRanked(searchRecords(records), query, limit))
+}
+
+func (v *Vault) semanticIndex(records []Record) ([]search.SemanticDocument, error) {
+	fingerprint := semanticFingerprint(records)
+	var cache semanticIndexCache
+	ok, err := v.GetMetaJSON(semanticIndexMetaKey, &cache)
+	if err != nil {
+		return nil, err
+	}
+	if ok && cache.Version == semanticIndexVersion && cache.Fingerprint == fingerprint {
+		return cache.Items, nil
+	}
+	items := search.BuildSemanticIndex(searchRecords(records))
+	cache = semanticIndexCache{
+		Version:     semanticIndexVersion,
+		Fingerprint: fingerprint,
+		BuiltAt:     utcNow(),
+		Items:       items,
+	}
+	if err := v.SetMetaJSON(semanticIndexMetaKey, cache); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func semanticFingerprint(records []Record) string {
+	parts := make([]string, 0, len(records))
+	for _, rec := range records {
+		parts = append(parts, rec.Kind+":"+rec.ID+":"+rec.UpdatedAt)
+	}
+	sort.Strings(parts)
+	hash := sha256.New()
+	for _, part := range parts {
+		_, _ = hash.Write([]byte(part))
+		_, _ = hash.Write([]byte{0})
+	}
+	return hex.EncodeToString(hash.Sum(nil))
 }
 
 func searchRecords(records []Record) []search.Record {

@@ -447,6 +447,7 @@ func (a *App) importCmd() *cobra.Command {
 
 func (a *App) askCmd() *cobra.Command {
 	var limit int
+	var semantic bool
 	cmd := &cobra.Command{
 		Use:   "ask <query>",
 		Short: "Search decrypted local memory.",
@@ -457,7 +458,12 @@ func (a *App) askCmd() *cobra.Command {
 				return err
 			}
 			defer v.Close()
-			hits, err := v.Search(args[0], limit)
+			var hits []vault.SearchHit
+			if semantic {
+				hits, err = v.SemanticSearch(args[0], "", limit)
+			} else {
+				hits, err = v.Search(args[0], limit)
+			}
 			if err != nil {
 				return err
 			}
@@ -472,6 +478,7 @@ func (a *App) askCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().IntVar(&limit, "limit", 10, "maximum search results")
+	cmd.Flags().BoolVar(&semantic, "semantic", false, "use local semantic search with the encrypted vault cache")
 	return cmd
 }
 

@@ -1005,6 +1005,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query().Get("q")
 	kind := r.URL.Query().Get("kind")
 	assetID := r.URL.Query().Get("asset_id")
+	mode := r.URL.Query().Get("mode")
 	limit := 20
 	v := s.currentVault()
 	var hits []vault.SearchHit
@@ -1015,11 +1016,19 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, collectErr.Error())
 			return
 		}
-		hits = searchRecordHits(records, query, limit)
+		hits = searchRecordHits(records, query, mode, limit)
 	} else if kind != "" && kind != "all" {
-		hits, err = v.SearchByKind(query, kind, limit)
+		if mode == "semantic" {
+			hits, err = v.SemanticSearch(query, kind, limit)
+		} else {
+			hits, err = v.SearchByKind(query, kind, limit)
+		}
 	} else {
-		hits, err = v.Search(query, limit)
+		if mode == "semantic" {
+			hits, err = v.SemanticSearch(query, "", limit)
+		} else {
+			hits, err = v.Search(query, limit)
+		}
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -1312,8 +1321,11 @@ func (s *Server) assetIDByNameOrValue(value string) string {
 	return ""
 }
 
-func searchRecordHits(records []vault.Record, query string, limit int) []vault.SearchHit {
+func searchRecordHits(records []vault.Record, query, mode string, limit int) []vault.SearchHit {
 	if strings.TrimSpace(query) != "" {
+		if mode == "semantic" {
+			return vault.SemanticSearchRecords(records, query, limit)
+		}
 		return vault.SearchRecords(records, query, limit)
 	}
 	hits := make([]vault.SearchHit, 0, len(records))
