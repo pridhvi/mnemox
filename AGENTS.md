@@ -23,12 +23,11 @@ Treat those files as the source of truth for product scope, current status, secu
 
 - Prefer existing packages and patterns before adding dependencies.
 - Keep CLI/console behavior working when web features are added.
-- Rebuild the web app with `npm run build` before committing frontend changes so `internal/web/static` stays current.
+- Rebuild with `make build` before committing frontend or backend changes so `internal/web/static` and `bin/mnemox` stay current.
 - Run these checks before committing when relevant:
   - `go test ./...`
   - `npm test` from `web/`
-  - `npm run build` from `web/`
-  - `go build -o bin/mnemox ./cmd/mnemox`
+  - `make build`
 - For rendered web changes, run a browser smoke test and capture the flow tested in the final response.
 
 ## Documentation Workflow

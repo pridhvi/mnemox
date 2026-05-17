@@ -1,13 +1,13 @@
 # Mnemox
 
-Mnemox is a Go-only, local-first memory console for pentest engagements. It
-stores findings, notes, evidence, credentials, and CVSS v4.0 Base scores in an
-encrypted local vault and renders copy-paste-ready Markdown Finding Packets.
+Mnemox is a local-first memory system for pentest engagements. It stores
+findings, notes, evidence, credentials, assets, and CVSS v4.0 Base scores in an
+encrypted local vault, then renders copy-paste-ready Markdown Finding Packets.
 
 ## Install
 
 ```bash
-go build -o bin/mnemox ./cmd/mnemox
+make build
 ```
 
 ## Console Workflow
@@ -41,11 +41,7 @@ The same commands work in batch mode:
 Build the embedded React UI and Go binary:
 
 ```bash
-cd web
-npm install
-npm run build
-cd ..
-go build -o bin/mnemox ./cmd/mnemox
+make build
 ```
 
 Start the local web app:
