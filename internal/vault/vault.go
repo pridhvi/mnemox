@@ -164,6 +164,13 @@ CREATE TABLE IF NOT EXISTS links (
 	relation TEXT NOT NULL,
 	created_at TEXT NOT NULL
 );
+DELETE FROM links
+WHERE rowid NOT IN (
+	SELECT MIN(rowid)
+	FROM links
+	GROUP BY src_id, dst_id, relation
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_links_unique ON links(src_id, dst_id, relation);
 `)
 	if err != nil {
 		return err
@@ -300,12 +307,38 @@ func (v *Vault) FindOne(kind, text string) (Record, error) {
 }
 
 func (v *Vault) AddLink(srcID, dstID, relation string) error {
-	_, err := v.DB.Exec(`INSERT INTO links(id, src_id, dst_id, relation, created_at) VALUES (?, ?, ?, ?, ?)`, uuid.NewString(), srcID, dstID, relation, utcNow())
+	_, err := v.DB.Exec(`INSERT OR IGNORE INTO links(id, src_id, dst_id, relation, created_at) VALUES (?, ?, ?, ?, ?)`, uuid.NewString(), srcID, dstID, relation, utcNow())
+	return err
+}
+
+func (v *Vault) RemoveLink(srcID, dstID, relation string) error {
+	_, err := v.DB.Exec(`DELETE FROM links WHERE src_id = ? AND dst_id = ? AND relation = ?`, srcID, dstID, relation)
 	return err
 }
 
 func (v *Vault) Linked(srcID, relation string) ([]Record, error) {
 	rows, err := v.DB.Query(`SELECT dst_id FROM links WHERE src_id = ? AND relation = ? ORDER BY created_at`, srcID, relation)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Record
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		rec, err := v.GetRecord(id)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, rec)
+	}
+	return out, rows.Err()
+}
+
+func (v *Vault) LinkedFrom(dstID, relation string) ([]Record, error) {
+	rows, err := v.DB.Query(`SELECT src_id FROM links WHERE dst_id = ? AND relation = ? ORDER BY created_at`, dstID, relation)
 	if err != nil {
 		return nil, err
 	}

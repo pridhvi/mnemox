@@ -81,6 +81,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/findings", s.requireUnlock(s.handleCreateFinding))
 	mux.HandleFunc("GET /api/findings/{id}", s.requireUnlock(s.handleGetFinding))
 	mux.HandleFunc("PUT /api/findings/{id}", s.requireUnlock(s.handleUpdateFinding))
+	mux.HandleFunc("POST /api/findings/{id}/assets", s.requireUnlock(s.handleLinkFindingAsset))
+	mux.HandleFunc("DELETE /api/findings/{id}/assets/{asset_id}", s.requireUnlock(s.handleUnlinkFindingAsset))
 	mux.HandleFunc("POST /api/findings/{id}/notes", s.requireUnlock(s.handleAddFindingNote))
 	mux.HandleFunc("POST /api/findings/{id}/evidence", s.requireUnlock(s.handleUploadFindingEvidence))
 	mux.HandleFunc("POST /api/findings/{id}/cvss", s.requireUnlock(s.handleScoreFinding))
@@ -92,10 +94,13 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/import/screenshots", s.requireUnlock(s.handleImportScreenshots))
 	mux.HandleFunc("GET /api/evidence", s.requireUnlock(s.handleListEvidence))
 	mux.HandleFunc("GET /api/evidence/{id}/download", s.requireUnlock(s.handleDownloadEvidence))
+	mux.HandleFunc("GET /api/evidence/{id}/preview", s.requireUnlock(s.handlePreviewEvidence))
+	mux.HandleFunc("POST /api/evidence/{id}/assets", s.requireUnlock(s.handleLinkEvidenceAsset))
 	mux.HandleFunc("GET /api/notes", s.requireUnlock(s.handleListNotes))
 	mux.HandleFunc("GET /api/credentials", s.requireUnlock(s.handleListCredentials))
 	mux.HandleFunc("POST /api/credentials", s.requireUnlock(s.handleCreateCredential))
 	mux.HandleFunc("GET /api/credentials/{id}/secret", s.requireUnlock(s.handleCredentialSecret))
+	mux.HandleFunc("POST /api/credentials/{id}/assets", s.requireUnlock(s.handleLinkCredentialAsset))
 	mux.HandleFunc("GET /api/search", s.requireUnlock(s.handleSearch))
 	mux.HandleFunc("GET /api/settings", s.requireUnlock(s.handleSettings))
 	mux.Handle("/", spaHandler())
@@ -248,9 +253,11 @@ func (s *Server) handleGetFinding(w http.ResponseWriter, r *http.Request) {
 	}
 	notes, _ := v.Linked(rec.ID, "has_note")
 	evidence, _ := v.Linked(rec.ID, "has_evidence")
+	assets, _ := v.Linked(rec.ID, "affects_asset")
 	response := recordResponse(rec)
 	response["notes"] = recordList(notes, false)
 	response["evidence"] = recordList(evidence, false)
+	response["assets"] = recordList(assets, false)
 	markdown, _ := packet.Render(v, rec.ID)
 	response["packet_markdown"] = markdown
 	writeJSON(w, http.StatusOK, response)
@@ -280,6 +287,32 @@ func (s *Server) handleUpdateFinding(w http.ResponseWriter, r *http.Request) {
 	}
 	next, _ := v.GetRecord(rec.ID)
 	writeJSON(w, http.StatusOK, recordResponse(next))
+}
+
+func (s *Server) handleLinkFindingAsset(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		AssetID string `json:"asset_id"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := s.linkTypedRecords(r.PathValue("id"), body.AssetID, "finding", "asset", "affects_asset"); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	assets, _ := s.currentVault().Linked(r.PathValue("id"), "affects_asset")
+	writeJSON(w, http.StatusOK, map[string]any{"items": recordList(assets, false)})
+}
+
+func (s *Server) handleUnlinkFindingAsset(w http.ResponseWriter, r *http.Request) {
+	v := s.currentVault()
+	if err := v.RemoveLink(r.PathValue("id"), r.PathValue("asset_id"), "affects_asset"); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	assets, _ := v.Linked(r.PathValue("id"), "affects_asset")
+	writeJSON(w, http.StatusOK, map[string]any{"items": recordList(assets, false)})
 }
 
 func (s *Server) handleAddFindingNote(w http.ResponseWriter, r *http.Request) {
@@ -358,6 +391,10 @@ func (s *Server) handleUploadFindingEvidence(w http.ResponseWriter, r *http.Requ
 	if err := v.AddLink(r.PathValue("id"), id, "has_evidence"); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	assets, _ := v.Linked(r.PathValue("id"), "affects_asset")
+	for _, asset := range assets {
+		_ = v.AddLink(id, asset.ID, "evidence_asset")
 	}
 	rec, _ := v.GetRecord(id)
 	writeJSON(w, http.StatusCreated, recordResponse(rec))
@@ -551,6 +588,53 @@ func (s *Server) handleDownloadEvidence(w http.ResponseWriter, r *http.Request) 
 	_, _ = w.Write(data)
 }
 
+func (s *Server) handlePreviewEvidence(w http.ResponseWriter, r *http.Request) {
+	v := s.currentVault()
+	rec, err := v.GetRecord(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if rec.Kind != "evidence" {
+		writeError(w, http.StatusBadRequest, "record is not evidence")
+		return
+	}
+	blobID := asString(rec.Payload["blob_id"])
+	if blobID == "" {
+		writeError(w, http.StatusNotFound, "evidence has no blob")
+		return
+	}
+	data, err := v.ReadBlob(blobID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	contentType := http.DetectContentType(data)
+	if !strings.HasPrefix(contentType, "image/") {
+		writeError(w, http.StatusUnsupportedMediaType, "evidence preview is only available for images")
+		return
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(data)
+}
+
+func (s *Server) handleLinkEvidenceAsset(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		AssetID string `json:"asset_id"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := s.linkTypedRecords(r.PathValue("id"), body.AssetID, "evidence", "asset", "evidence_asset"); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	assets, _ := s.currentVault().Linked(r.PathValue("id"), "evidence_asset")
+	writeJSON(w, http.StatusOK, map[string]any{"items": recordList(assets, false)})
+}
+
 func (s *Server) handleListNotes(w http.ResponseWriter, r *http.Request) {
 	records, err := s.currentVault().Records("note")
 	if err != nil {
@@ -607,6 +691,22 @@ func (s *Server) handleCredentialSecret(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]any{"secret": asString(rec.Payload["secret"])})
 }
 
+func (s *Server) handleLinkCredentialAsset(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		AssetID string `json:"asset_id"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := s.linkTypedRecords(r.PathValue("id"), body.AssetID, "credential", "asset", "credential_asset"); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	assets, _ := s.currentVault().Linked(r.PathValue("id"), "credential_asset")
+	writeJSON(w, http.StatusOK, map[string]any{"items": recordList(assets, false)})
+}
+
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query().Get("q")
 	limit := 20
@@ -629,6 +729,25 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		"server":     s.addr,
 		"unlocked":   s.currentVault() != nil,
 	})
+}
+
+func (s *Server) linkTypedRecords(srcID, dstID, srcKind, dstKind, relation string) error {
+	v := s.currentVault()
+	src, err := v.GetRecord(srcID)
+	if err != nil {
+		return err
+	}
+	if src.Kind != srcKind {
+		return fmt.Errorf("source record is %s, expected %s", src.Kind, srcKind)
+	}
+	dst, err := v.GetRecord(dstID)
+	if err != nil {
+		return err
+	}
+	if dst.Kind != dstKind {
+		return fmt.Errorf("target record is %s, expected %s", dst.Kind, dstKind)
+	}
+	return v.AddLink(srcID, dstID, relation)
 }
 
 func spaHandler() http.Handler {

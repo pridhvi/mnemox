@@ -28,6 +28,10 @@ export const api = {
   getFinding: (id: string) => request<FindingRecord>(`/api/findings/${id}`),
   updateFinding: (id: string, payload: FindingPayload) =>
     request<FindingRecord>(`/api/findings/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
+  linkFindingAsset: (id: string, assetId: string) =>
+    request<{ items: RecordEnvelope[] }>(`/api/findings/${id}/assets`, { method: 'POST', body: JSON.stringify({ asset_id: assetId }) }),
+  unlinkFindingAsset: (id: string, assetId: string) =>
+    request<{ items: RecordEnvelope[] }>(`/api/findings/${id}/assets/${assetId}`, { method: 'DELETE' }),
   addNote: (id: string, payload: { text: string; asset: string; tags: string[] }) =>
     request<RecordEnvelope>(`/api/findings/${id}/notes`, { method: 'POST', body: JSON.stringify(payload) }),
   uploadEvidence: (id: string, form: FormData) =>

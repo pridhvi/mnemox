@@ -2,6 +2,7 @@ package web
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"mime/multipart"
@@ -43,6 +44,12 @@ func TestWebAPIWorkflowAndCredentialRedaction(t *testing.T) {
 	if len(assets["items"].([]any)) != 1 {
 		t.Fatalf("expected asset list item: %#v", assets)
 	}
+	assetID := assets["items"].([]any)[0].(map[string]any)["id"].(string)
+	postJSON(t, ts.URL+"/api/findings/"+findingID+"/assets", map[string]any{"asset_id": assetID}, http.StatusOK)
+	detailWithAsset := getJSON(t, ts.URL+"/api/findings/"+findingID, http.StatusOK)
+	if len(detailWithAsset["assets"].([]any)) != 1 {
+		t.Fatalf("expected linked finding asset: %#v", detailWithAsset)
+	}
 	uploadImport(t, ts.URL+"/api/import/nmap", "nmap.xml", `<nmaprun><host><address addr="10.0.0.11"/><ports><port protocol="tcp" portid="80"><state state="open"/><service name="http"/></port></ports></host></nmaprun>`)
 
 	putJSON(t, ts.URL+"/api/findings/"+findingID, map[string]any{
@@ -62,7 +69,16 @@ func TestWebAPIWorkflowAndCredentialRedaction(t *testing.T) {
 		"asset": "ci.acme.local",
 	}, http.StatusCreated)
 
-	uploadEvidence(t, ts.URL+"/api/findings/"+findingID+"/evidence")
+	evidenceRecord := uploadEvidence(t, ts.URL+"/api/findings/"+findingID+"/evidence")
+	previewReq, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/evidence/"+evidenceRecord["id"].(string)+"/preview", nil)
+	previewResp, err := http.DefaultClient.Do(previewReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = previewResp.Body.Close()
+	if previewResp.StatusCode != http.StatusOK || previewResp.Header.Get("Content-Type") != "image/png" {
+		t.Fatalf("unexpected preview response: %d %s", previewResp.StatusCode, previewResp.Header.Get("Content-Type"))
+	}
 
 	cvss := postJSON(t, ts.URL+"/api/findings/"+findingID+"/cvss", map[string]any{
 		"metrics": map[string]string{"AV": "N", "AC": "L", "AT": "N", "PR": "N", "UI": "N", "VC": "L", "VI": "N", "VA": "N", "SC": "N", "SI": "N", "SA": "N"},
@@ -144,16 +160,21 @@ func doJSON(t *testing.T, req *http.Request, status int) map[string]any {
 	return out
 }
 
-func uploadEvidence(t *testing.T, url string) {
+func uploadEvidence(t *testing.T, url string) map[string]any {
 	t.Helper()
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
-	part, err := writer.CreateFormFile("file", "jenkins.txt")
+	part, err := writer.CreateFormFile("file", "jenkins.png")
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _ = part.Write([]byte("dashboard visible"))
+	png, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = part.Write(png)
 	_ = writer.WriteField("caption", "Dashboard visible without authentication")
+	_ = writer.WriteField("kind", "screenshot")
 	if err := writer.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +183,7 @@ func uploadEvidence(t *testing.T, url string) {
 		t.Fatal(err)
 	}
 	req.Header.Set("Content-Type", writer.FormDataContentType())
-	doJSON(t, req, http.StatusCreated)
+	return doJSON(t, req, http.StatusCreated)
 }
 
 func uploadImport(t *testing.T, url, filename, content string) {

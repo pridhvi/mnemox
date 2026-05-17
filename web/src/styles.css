@@ -466,6 +466,69 @@ label.compact textarea {
   max-height: calc(100vh - 120px);
 }
 
+.asset-linker {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.chip-list button {
+  min-height: 28px;
+  color: var(--accent);
+  border-color: rgba(88, 214, 141, 0.45);
+  background: rgba(88, 214, 141, 0.08);
+  font-size: 12px;
+}
+
+.evidence-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.compact-grid {
+  grid-template-columns: 1fr;
+}
+
+.evidence-card {
+  border: 1px solid var(--line);
+  background: rgba(16, 22, 29, 0.78);
+  border-radius: 8px;
+  overflow: hidden;
+  display: grid;
+  gap: 9px;
+  padding: 10px;
+}
+
+.evidence-card img,
+.file-preview {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: #090d12;
+  object-fit: cover;
+}
+
+.file-preview {
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+
+.evidence-card strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .module-page {
   padding: 22px;
   display: grid;

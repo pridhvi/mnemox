@@ -33,6 +33,7 @@ export type FindingRecord = RecordEnvelope<FindingPayload> & {
   evidence_count?: number;
   notes?: RecordEnvelope[];
   evidence?: RecordEnvelope[];
+  assets?: RecordEnvelope[];
   packet_markdown?: string;
 };
 

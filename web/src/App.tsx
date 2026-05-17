@@ -106,7 +106,7 @@ export function App() {
         {error && <div className="notice error">{error}</div>}
         {active === 'findings' && <FindingWorkspace key={refreshKey} />}
         {active === 'assets' && <AssetsModule />}
-        {active === 'evidence' && <RecordTable title="Evidence" loader={api.evidence} />}
+        {active === 'evidence' && <EvidenceModule />}
         {active === 'notes' && <RecordTable title="Notes" loader={api.notes} />}
         {active === 'credentials' && <CredentialsModule />}
         {active === 'search' && <SearchModule />}
@@ -177,6 +177,7 @@ function FindingWorkspace() {
   const [findings, setFindings] = useState<FindingRecord[]>([]);
   const [selectedId, setSelectedId] = useState('');
   const [detail, setDetail] = useState<FindingRecord | null>(null);
+  const [allAssets, setAllAssets] = useState<RecordEnvelope[]>([]);
   const [form, setForm] = useState<FindingPayload>(emptyFinding);
   const [scopeText, setScopeText] = useState('');
   const [refsText, setRefsText] = useState('');
@@ -188,11 +189,13 @@ function FindingWorkspace() {
   const [metrics, setMetrics] = useState(defaultMetrics());
   const [vector, setVector] = useState('');
   const [cvssNotes, setCvssNotes] = useState('');
+  const [assetToLink, setAssetToLink] = useState('');
   const [error, setError] = useState('');
 
   const loadFindings = useCallback(async () => {
-    const response = await api.listFindings();
+    const [response, assets] = await Promise.all([api.listFindings(), api.assets()]);
     setFindings(response.items);
+    setAllAssets(assets.items);
     if (!selectedId && response.items[0]) setSelectedId(response.items[0].id);
   }, [selectedId]);
 
@@ -263,6 +266,19 @@ function FindingWorkspace() {
     setEvidenceFile(null);
     setEvidenceCaption('');
     await loadFindings();
+    await loadDetail();
+  }
+
+  async function linkAsset() {
+    if (!selectedId || !assetToLink) return;
+    await api.linkFindingAsset(selectedId, assetToLink);
+    setAssetToLink('');
+    await loadDetail();
+  }
+
+  async function unlinkAsset(assetId: string) {
+    if (!selectedId) return;
+    await api.unlinkFindingAsset(selectedId, assetId);
     await loadDetail();
   }
 
@@ -367,6 +383,27 @@ function FindingWorkspace() {
               {detail.payload.cvss && <p className="score-line">{detail.payload.cvss.score} · {detail.payload.cvss.severity}</p>}
             </Panel>
 
+            <Panel title="Affected Assets">
+              <div className="asset-linker">
+                <select value={assetToLink} onChange={(event) => setAssetToLink(event.target.value)}>
+                  <option value="">Select asset</option>
+                  {allAssets.map((asset) => (
+                    <option key={asset.id} value={asset.id}>
+                      {String(asset.payload.name || asset.payload.value)}
+                    </option>
+                  ))}
+                </select>
+                <button onClick={linkAsset}>Link</button>
+              </div>
+              <div className="chip-list">
+                {(detail.assets || []).map((asset) => (
+                  <button key={asset.id} onClick={() => unlinkAsset(asset.id)} title="Unlink asset">
+                    {String(asset.payload.name || asset.payload.value)}
+                  </button>
+                ))}
+              </div>
+            </Panel>
+
             <Panel title="Notes">
               <div className="inline-form">
                 <input value={noteText} onChange={(event) => setNoteText(event.target.value)} placeholder="Quick note" />
@@ -380,7 +417,7 @@ function FindingWorkspace() {
               <input type="file" onChange={(event) => setEvidenceFile(event.target.files?.[0] || null)} />
               <input value={evidenceCaption} onChange={(event) => setEvidenceCaption(event.target.value)} placeholder="Caption" />
               <button onClick={uploadEvidence}>Attach evidence</button>
-              <MiniList records={detail.evidence || []} primary="caption" />
+              <EvidenceCards records={detail.evidence || []} />
             </Panel>
 
             <Panel title="Finding Packet">
@@ -414,6 +451,23 @@ function RecordTable({ title, loader }: { title: string; loader: () => Promise<{
             <span>{item.kind}</span>
             <small>{formatDate(item.updated_at)}</small>
           </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function EvidenceModule() {
+  const [items, setItems] = useState<RecordEnvelope[]>([]);
+  useEffect(() => {
+    api.evidence().then((response) => setItems(response.items));
+  }, []);
+  return (
+    <section className="module-page">
+      <h1>Evidence</h1>
+      <div className="evidence-grid">
+        {items.map((item) => (
+          <EvidenceCard key={item.id} record={item} />
         ))}
       </div>
     </section>
@@ -679,6 +733,40 @@ function MiniList({ records, primary }: { records: RecordEnvelope[]; primary: st
           <small>{record.id.slice(0, 8)}</small>
         </div>
       ))}
+    </div>
+  );
+}
+
+function EvidenceCards({ records }: { records: RecordEnvelope[] }) {
+  return (
+    <div className="evidence-grid compact-grid">
+      {records.map((record) => (
+        <EvidenceCard key={record.id} record={record} />
+      ))}
+    </div>
+  );
+}
+
+function EvidenceCard({ record }: { record: RecordEnvelope }) {
+  const kind = String(record.payload.kind || 'file');
+  const caption = String(record.payload.caption || record.payload.original_path || record.id);
+  const isImage = kind === 'screenshot' || /\.(png|jpe?g|webp)$/i.test(String(record.payload.original_path || ''));
+  return (
+    <div className="evidence-card">
+      {isImage ? (
+        <img src={`/api/evidence/${record.id}/preview`} alt={caption} />
+      ) : (
+        <div className="file-preview">
+          <FileText size={26} />
+        </div>
+      )}
+      <div>
+        <strong>{caption}</strong>
+        <small>{kind} · {record.id.slice(0, 8)}</small>
+      </div>
+      <a className="button-link" href={`/api/evidence/${record.id}/download`}>
+        <Download size={14} /> Export
+      </a>
     </div>
   );
 }
