@@ -46,7 +46,7 @@ This is the canonical implementation backlog. Keep it synchronized with code cha
 - [ ] Search filters by tag and finding status.
 - [x] Attack Paths linked-chain view.
 - [ ] Attack Paths graph visualization.
-- [ ] Evidence citation bundles for AI prompts.
+- [x] Evidence citation bundles for AI prompts.
 - [ ] Local embedding index with encrypted cache.
 
 ## Milestone 5: Release

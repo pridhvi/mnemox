@@ -31,6 +31,12 @@ func TestEndToEndFindingPacket(t *testing.T) {
 			t.Fatalf("packet missing %q:\n%s", want, packet)
 		}
 	}
+	bundle := run(t, bin, dir, "packet", "bundle", "Jenkins anonymous read")
+	for _, want := range []string{"# Evidence Citation Bundle: Jenkins anonymous read", "Dashboard visible without authentication", "Build history was visible", "[evidence:", "[note:"} {
+		if !strings.Contains(bundle, want) {
+			t.Fatalf("bundle missing %q:\n%s", want, bundle)
+		}
+	}
 }
 
 func TestSearchFindsEncryptedRecordContents(t *testing.T) {

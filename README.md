@@ -74,6 +74,7 @@ By default, Mnemox uses `.mnemox/` in the current directory. Set
 - `ask`: local evidence recall over decrypted vault records.
 - `cvss score`: calculate and store a CVSS v4.0 Base score.
 - `packet build`: render a cited Markdown Finding Packet.
+- `packet bundle`: render a prompt-ready Evidence Citation Bundle.
 - `export-blob`: decrypt an evidence blob to a file.
 - `serve`: start the local web UI.
 - `use <vault-path>`: console-only command to switch vault path.

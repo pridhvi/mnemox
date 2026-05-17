@@ -1063,6 +1063,7 @@ function PacketsModule() {
   const [assets, setAssets] = useState<RecordEnvelope[]>([]);
   const [assetId, setAssetId] = useState('');
   const [selected, setSelected] = useState('');
+  const [packetMode, setPacketMode] = useState<'packet' | 'citation'>('packet');
   const [markdown, setMarkdown] = useState('');
   useEffect(() => {
     api.assets().then((response) => setAssets(response.items));
@@ -1074,13 +1075,30 @@ function PacketsModule() {
     });
   }, [assetId]);
   useEffect(() => {
-    if (selected) api.packet(selected).then((response) => setMarkdown(response.markdown));
-    else setMarkdown('');
-  }, [selected]);
+    if (!selected) {
+      setMarkdown('');
+      return;
+    }
+    const loader = packetMode === 'citation' ? api.citationBundle(selected, assetId) : api.packet(selected);
+    loader.then((response) => setMarkdown(response.markdown));
+  }, [selected, assetId, packetMode]);
+  const downloadHref = selected
+    ? packetMode === 'citation'
+      ? `/api/findings/${selected}/citation-bundle?download=1${assetId ? `&asset_id=${encodeURIComponent(assetId)}` : ''}`
+      : `/api/findings/${selected}/packet?download=1`
+    : '';
   return (
     <section className="module-page two-column">
       <div>
         <h1>Packets</h1>
+        <div className="segmented">
+          <button type="button" className={packetMode === 'packet' ? 'active' : ''} onClick={() => setPacketMode('packet')}>
+            Finding Packet
+          </button>
+          <button type="button" className={packetMode === 'citation' ? 'active' : ''} onClick={() => setPacketMode('citation')}>
+            Citation Bundle
+          </button>
+        </div>
         <select value={assetId} onChange={(event) => setAssetId(event.target.value)}>
           <option value="">All assets</option>
           {assets.map((asset) => <option key={asset.id} value={asset.id}>{assetLabel(asset)}</option>)}
@@ -1091,7 +1109,7 @@ function PacketsModule() {
         </select>
         <div className="packet-actions">
           <button onClick={() => navigator.clipboard.writeText(markdown)}><Clipboard size={15} /> Copy Markdown</button>
-          {selected && <a className="button-link" href={`/api/findings/${selected}/packet?download=1`}><Download size={15} /> Download</a>}
+          {selected && <a className="button-link" href={downloadHref}><Download size={15} /> Download</a>}
         </div>
       </div>
       <pre className="packet-preview large">{markdown}</pre>

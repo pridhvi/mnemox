@@ -69,6 +69,7 @@ The primary workflow is the local web UI started with `mnemox serve`. The CLI an
 - Search findings, notes, evidence metadata, asset metadata, and credential metadata.
 - Credential secrets are excluded.
 - Filters exist for kind and asset relationship.
+- Evidence citation bundles can render prompt-ready, cited Markdown for a finding and optional asset scope.
 
 ### Attack Paths
 
@@ -87,7 +88,6 @@ The primary workflow is the local web UI started with `mnemox serve`. The CLI an
 
 ## Near-Term Roadmap Order
 
-1. Evidence citation bundles.
-2. Local semantic search with encrypted embedding cache.
-3. Attack path graph visualization.
-4. Release polish: signed artifacts, Homebrew tap, docs site.
+1. Local semantic search with encrypted embedding cache.
+2. Attack path graph visualization.
+3. Release polish: signed artifacts, Homebrew tap, docs site.

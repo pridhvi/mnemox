@@ -125,6 +125,13 @@ func TestWebAPIWorkflowAndCredentialRedaction(t *testing.T) {
 	if !strings.Contains(packet["markdown"].(string), "Jenkins anonymous read") {
 		t.Fatalf("packet missing finding title: %#v", packet)
 	}
+	bundle := getJSON(t, ts.URL+"/api/findings/"+findingID+"/citation-bundle?asset_id="+assetID, http.StatusOK)
+	bundleMarkdown := bundle["markdown"].(string)
+	for _, expected := range []string{"Evidence Citation Bundle", "Updated dashboard proof", "Build history and job output were visible", "[evidence:", "[note:"} {
+		if !strings.Contains(bundleMarkdown, expected) {
+			t.Fatalf("citation bundle missing %q: %s", expected, bundleMarkdown)
+		}
+	}
 
 	credential := postJSON(t, ts.URL+"/api/credentials", map[string]any{
 		"name":     "svc_backup",

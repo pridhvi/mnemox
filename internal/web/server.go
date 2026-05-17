@@ -87,6 +87,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/findings/{id}/evidence", s.requireUnlock(s.handleUploadFindingEvidence))
 	mux.HandleFunc("POST /api/findings/{id}/cvss", s.requireUnlock(s.handleScoreFinding))
 	mux.HandleFunc("GET /api/findings/{id}/packet", s.requireUnlock(s.handleFindingPacket))
+	mux.HandleFunc("GET /api/findings/{id}/citation-bundle", s.requireUnlock(s.handleCitationBundle))
 	mux.HandleFunc("GET /api/assets", s.requireUnlock(s.handleListAssets))
 	mux.HandleFunc("POST /api/assets", s.requireUnlock(s.handleCreateAsset))
 	mux.HandleFunc("GET /api/assets/duplicates", s.requireUnlock(s.handleAssetDuplicates))
@@ -476,6 +477,23 @@ func (s *Server) handleFindingPacket(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("download") == "1" {
 		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
 		w.Header().Set("Content-Disposition", `attachment; filename="finding-packet.md"`)
+		_, _ = w.Write([]byte(markdown))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"markdown": markdown})
+}
+
+func (s *Server) handleCitationBundle(w http.ResponseWriter, r *http.Request) {
+	markdown, err := packet.RenderCitationBundle(s.currentVault(), r.PathValue("id"), packet.CitationBundleOptions{
+		AssetID: r.URL.Query().Get("asset_id"),
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if r.URL.Query().Get("download") == "1" {
+		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+		w.Header().Set("Content-Disposition", `attachment; filename="evidence-citation-bundle.md"`)
 		_, _ = w.Write([]byte(markdown))
 		return
 	}

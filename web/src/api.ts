@@ -42,6 +42,8 @@ export const api = {
   scoreCvss: (id: string, payload: { vector?: string; metrics?: Record<string, string>; notes: string }) =>
     request(`/api/findings/${id}/cvss`, { method: 'POST', body: JSON.stringify(payload) }),
   packet: (id: string) => request<{ markdown: string }>(`/api/findings/${id}/packet`),
+  citationBundle: (id: string, assetId = '') =>
+    request<{ markdown: string }>(`/api/findings/${id}/citation-bundle${assetId ? `?asset_id=${encodeURIComponent(assetId)}` : ''}`),
   assets: () => request<{ items: RecordEnvelope[] }>('/api/assets'),
   asset: (id: string) => request<AssetDetail>(`/api/assets/${id}`),
   assetDuplicates: () => request<{ items: AssetDuplicateGroup[] }>('/api/assets/duplicates'),

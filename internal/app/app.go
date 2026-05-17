@@ -544,6 +544,7 @@ func (a *App) cvssCmd() *cobra.Command {
 func (a *App) packetCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "packet", Short: "Build report-ready finding packets."}
 	var output string
+	var bundleOutput, bundleAsset string
 	build := &cobra.Command{
 		Use:   "build <finding>",
 		Short: "Render a Markdown Finding Packet.",
@@ -574,7 +575,46 @@ func (a *App) packetCmd() *cobra.Command {
 		},
 	}
 	build.Flags().StringVar(&output, "output", "", "write Markdown to file")
-	cmd.AddCommand(build)
+	bundle := &cobra.Command{
+		Use:   "bundle <finding>",
+		Short: "Render a cited evidence bundle for prompt-ready report drafting.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			v, err := a.openVault()
+			if err != nil {
+				return err
+			}
+			defer v.Close()
+			rec, err := v.FindOne("finding", args[0])
+			if err != nil {
+				return err
+			}
+			var assetID string
+			if bundleAsset != "" {
+				asset, err := v.FindOne("asset", bundleAsset)
+				if err != nil {
+					return err
+				}
+				assetID = asset.ID
+			}
+			markdown, err := packet.RenderCitationBundle(v, rec.ID, packet.CitationBundleOptions{AssetID: assetID})
+			if err != nil {
+				return err
+			}
+			if bundleOutput != "" {
+				if err := os.WriteFile(bundleOutput, []byte(markdown), 0o600); err != nil {
+					return err
+				}
+				fmt.Println("Wrote", bundleOutput)
+				return nil
+			}
+			fmt.Print(markdown)
+			return nil
+		},
+	}
+	bundle.Flags().StringVar(&bundleAsset, "asset", "", "limit bundle to evidence and notes linked to an asset")
+	bundle.Flags().StringVar(&bundleOutput, "output", "", "write Markdown to file")
+	cmd.AddCommand(build, bundle)
 	return cmd
 }
 
