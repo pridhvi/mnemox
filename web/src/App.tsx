@@ -1163,13 +1163,21 @@ function AttackPathMap({ path, included, selectedId, onSelect }: { path: AttackP
         <span>{assetLabel(path)}</span>
       </div>
       <svg viewBox="0 0 620 300" role="img" aria-label={`Attack path map for ${assetLabel(path)}`}>
+        <defs>
+          {nodes.map((node) => (
+            <clipPath key={`${node.record.id}-clip`} id={nodeClipId(node.record.id)}>
+              <rect x={node.x - 68} y={node.y - 20} width="136" height="40" />
+            </clipPath>
+          ))}
+        </defs>
         {assetNode && nodes.filter((node) => node.record.id !== path.id).map((node) => (
           <line key={`${node.record.id}-edge`} x1={assetNode.x} y1={assetNode.y} x2={node.x} y2={node.y} className={`map-edge ${node.kind}`} />
         ))}
         {nodes.map((node) => (
           <g key={node.record.id} className={`map-node ${node.kind} ${selectedId === node.record.id ? 'selected' : ''}`} onClick={() => onSelect(node.record.id)} tabIndex={0} role="button" aria-label={recordTitle(node.record)}>
+            <title>{recordTitle(node.record)}</title>
             <rect x={node.x - 78} y={node.y - 27} width="156" height="54" rx="7" />
-            <text x={node.x} y={node.y - 5}>{truncate(recordTitle(node.record), 22)}</text>
+            <text x={node.x} y={node.y - 5} clipPath={`url(#${nodeClipId(node.record.id)})`}>{truncate(recordTitle(node.record), 17)}</text>
             <text x={node.x} y={node.y + 15} className="node-subtitle">{node.kind}</text>
           </g>
         ))}
@@ -1466,6 +1474,10 @@ export function buildAttackPathMarkdown(path: AttackPath, included: Record<strin
 
 function truncate(value: string, limit: number) {
   return value.length > limit ? `${value.slice(0, limit - 1)}...` : value;
+}
+
+function nodeClipId(id: string) {
+  return `node-clip-${id.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
 }
 
 function PathColumn({ title, records }: { title: string; records: RecordEnvelope[] }) {

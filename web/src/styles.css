@@ -841,6 +841,15 @@ label.compact textarea {
   min-width: 0;
 }
 
+.section-head span,
+.record-head strong,
+.record-head span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .risk-pill {
   border: 1px solid rgba(88, 214, 141, 0.45);
   border-radius: 7px;
