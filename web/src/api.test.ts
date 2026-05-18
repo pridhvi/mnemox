@@ -20,4 +20,19 @@ describe('api search', () => {
       expect.any(Object),
     );
   });
+
+  it('sends tag and status filters', async () => {
+    const fetchMock = vi.fn(async (path: string) => ({
+      ok: true,
+      json: async () => ({ items: [], path }),
+    })) as unknown as typeof fetch;
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.search('jenkins', { tag: 'prod', status: 'confirmed' });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/search?q=jenkins&tag=prod&status=confirmed',
+      expect.any(Object),
+    );
+  });
 });

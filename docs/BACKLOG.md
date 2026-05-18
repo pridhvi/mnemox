@@ -43,7 +43,7 @@ This is the canonical implementation backlog. Keep it synchronized with code cha
 - [x] Credential secrets excluded from search material.
 - [x] Search filters by kind and linked asset.
 - [x] Packet filtering by linked asset.
-- [ ] Search filters by tag and finding status.
+- [x] Search filters by tag and finding status.
 - [x] Attack Paths linked-chain view.
 - [x] Attack Paths workspace with risk hubs, visual map, chain packet, and completeness checks.
 - [x] Evidence citation bundles for AI prompts.

@@ -1018,33 +1018,31 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	kind := r.URL.Query().Get("kind")
 	assetID := r.URL.Query().Get("asset_id")
 	mode := r.URL.Query().Get("mode")
+	tag := r.URL.Query().Get("tag")
+	status := r.URL.Query().Get("status")
 	limit := 20
 	v := s.currentVault()
 	var hits []vault.SearchHit
+	var records []vault.Record
 	var err error
 	if assetID != "" {
-		records, collectErr := s.assetRelatedRecords(assetID, kind)
-		if collectErr != nil {
-			writeError(w, http.StatusBadRequest, collectErr.Error())
+		records, err = s.assetRelatedRecords(assetID, kind)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		hits = searchRecordHits(records, query, mode, limit)
 	} else if kind != "" && kind != "all" {
-		if mode == "semantic" {
-			hits, err = v.SemanticSearch(query, kind, limit)
-		} else {
-			hits, err = v.SearchByKind(query, kind, limit)
-		}
+		records, err = v.Records(kind)
 	} else {
-		if mode == "semantic" {
-			hits, err = v.SemanticSearch(query, "", limit)
-		} else {
-			hits, err = v.Search(query, limit)
-		}
+		records, err = v.Records("")
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	records = filterSearchRecords(records, tag, status)
+	if strings.TrimSpace(query) != "" || assetID != "" || strings.TrimSpace(tag) != "" || normalizedStatus(status) != "" {
+		hits = searchRecordHits(records, query, mode, limit)
 	}
 	for i := range hits {
 		if hits[i].Kind == "credential" {
@@ -1358,6 +1356,46 @@ func searchRecordHits(records []vault.Record, query, mode string, limit int) []v
 		return hits[:limit]
 	}
 	return hits
+}
+
+func filterSearchRecords(records []vault.Record, tag, status string) []vault.Record {
+	tag = strings.ToLower(strings.TrimSpace(tag))
+	status = normalizedStatus(status)
+	if tag == "" && status == "" {
+		return records
+	}
+	filtered := make([]vault.Record, 0, len(records))
+	for _, rec := range records {
+		if tag != "" && !recordHasTag(rec, tag) {
+			continue
+		}
+		if status != "" && !recordHasStatus(rec, status) {
+			continue
+		}
+		filtered = append(filtered, rec)
+	}
+	return filtered
+}
+
+func recordHasTag(rec vault.Record, tag string) bool {
+	for _, candidate := range asStringSlice(rec.Payload["tags"]) {
+		if strings.EqualFold(strings.TrimSpace(candidate), tag) {
+			return true
+		}
+	}
+	return false
+}
+
+func recordHasStatus(rec vault.Record, status string) bool {
+	return rec.Kind == "finding" && strings.EqualFold(asString(rec.Payload["status"]), status)
+}
+
+func normalizedStatus(status string) string {
+	status = strings.TrimSpace(status)
+	if strings.EqualFold(status, "all") {
+		return ""
+	}
+	return status
 }
 
 func attackPathRisk(findings, evidence, credentials []vault.Record) int {

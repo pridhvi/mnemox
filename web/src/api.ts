@@ -82,12 +82,14 @@ export const api = {
     request<{ items: RecordEnvelope[] }>(`/api/credentials/${id}/assets`, { method: 'POST', body: JSON.stringify({ asset_id: assetId }) }),
   unlinkCredentialAsset: (id: string, assetId: string) =>
     request<{ items: RecordEnvelope[] }>(`/api/credentials/${id}/assets/${assetId}`, { method: 'DELETE' }),
-  search: (query: string, filters: { kind?: string; assetId?: string; mode?: string } = {}) => {
+  search: (query: string, filters: { kind?: string; assetId?: string; mode?: string; tag?: string; status?: string } = {}) => {
     const params = new URLSearchParams();
     if (query) params.set('q', query);
     if (filters.kind && filters.kind !== 'all') params.set('kind', filters.kind);
     if (filters.assetId) params.set('asset_id', filters.assetId);
     if (filters.mode && filters.mode !== 'keyword') params.set('mode', filters.mode);
+    if (filters.tag) params.set('tag', filters.tag);
+    if (filters.status && filters.status !== 'all') params.set('status', filters.status);
     return request<{ items: SearchHit[] }>(`/api/search?${params.toString()}`);
   },
   attackPaths: () => request<{ items: AttackPath[] }>('/api/attack-paths'),

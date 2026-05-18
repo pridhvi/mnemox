@@ -1135,7 +1135,7 @@ label.compact textarea {
 
 .filter-row {
   display: grid;
-  grid-template-columns: minmax(190px, 240px) minmax(160px, 220px) minmax(260px, 1fr);
+  grid-template-columns: minmax(190px, 240px) minmax(150px, 190px) minmax(220px, 1fr) minmax(150px, 190px) minmax(150px, 190px);
   gap: 10px;
 }
 

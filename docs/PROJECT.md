@@ -68,7 +68,7 @@ The primary workflow is the local web UI started with `mnemox serve`. The CLI an
 
 - Search findings, notes, evidence metadata, asset metadata, and credential metadata.
 - Credential secrets are excluded.
-- Filters exist for kind and asset relationship.
+- Filters exist for kind, linked asset, tag, and finding status.
 - Optional semantic mode uses deterministic local embeddings stored only in the encrypted vault metadata cache.
 - Evidence citation bundles can render prompt-ready, cited Markdown for a finding and optional asset scope.
 

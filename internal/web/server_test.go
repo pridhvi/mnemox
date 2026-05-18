@@ -185,6 +185,19 @@ func TestWebAPIWorkflowAndCredentialRedaction(t *testing.T) {
 	if len(relatedSemanticSearch["items"].([]any)) != 1 {
 		t.Fatalf("expected linked semantic finding search result: %#v", relatedSemanticSearch)
 	}
+	statusSearch := getJSON(t, ts.URL+"/api/search?q=jenkins&status=confirmed", http.StatusOK)
+	if len(statusSearch["items"].([]any)) != 1 {
+		t.Fatalf("expected status-filtered finding search result: %#v", statusSearch)
+	}
+	tagSearch := getJSON(t, ts.URL+"/api/search?kind=credential&tag=prod", http.StatusOK)
+	encoded, _ = json.Marshal(tagSearch)
+	if strings.Contains(string(encoded), "super-secret-value") || !strings.Contains(string(encoded), "svc_backup") {
+		t.Fatalf("credential tag search redaction failed: %s", encoded)
+	}
+	evidenceTagSearch := getJSON(t, ts.URL+"/api/search?asset_id="+assetID+"&kind=evidence&tag=auth", http.StatusOK)
+	if len(evidenceTagSearch["items"].([]any)) != 1 {
+		t.Fatalf("expected asset and tag filtered evidence result: %#v", evidenceTagSearch)
+	}
 	relatedCredentialSearch := getJSON(t, ts.URL+"/api/search?asset_id="+assetID+"&kind=credential", http.StatusOK)
 	encoded, _ = json.Marshal(relatedCredentialSearch)
 	if strings.Contains(string(encoded), "super-secret-value") || !strings.Contains(string(encoded), "svc_backup") {

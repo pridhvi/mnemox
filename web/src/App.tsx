@@ -977,13 +977,15 @@ function SearchModule() {
   const [kind, setKind] = useState('all');
   const [assetId, setAssetId] = useState('');
   const [mode, setMode] = useState<'keyword' | 'semantic'>('keyword');
+  const [tag, setTag] = useState('');
+  const [status, setStatus] = useState('all');
   const [assets, setAssets] = useState<RecordEnvelope[]>([]);
   const [items, setItems] = useState<SearchHit[]>([]);
   useEffect(() => {
     api.assets().then((response) => setAssets(response.items));
   }, []);
   async function runSearch() {
-    const response = await api.search(query, { kind, assetId, mode });
+    const response = await api.search(query, { kind, assetId, mode, tag: tag.trim(), status });
     setItems(response.items);
   }
   return (
@@ -1007,6 +1009,12 @@ function SearchModule() {
           <option value="">Any asset relationship</option>
           {assets.map((asset) => (
             <option key={asset.id} value={asset.id}>{assetLabel(asset)}</option>
+          ))}
+        </select>
+        <input value={tag} onChange={(event) => setTag(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && runSearch()} placeholder="Tag filter" />
+        <select value={status} onChange={(event) => setStatus(event.target.value)}>
+          {['all', 'draft', 'confirmed', 'fixed', 'accepted-risk'].map((option) => (
+            <option key={option} value={option}>{option}</option>
           ))}
         </select>
       </div>
