@@ -51,6 +51,7 @@ The primary workflow is the local web UI started with `mnemox serve`. The CLI an
 - Edit evidence metadata.
 - Link/unlink evidence to assets.
 - Export decrypted evidence blobs through explicit user action.
+- Manually extract OCR text from image evidence with optional local Tesseract, storing output as encrypted evidence metadata.
 
 ### Credentials
 
@@ -68,6 +69,7 @@ The primary workflow is the local web UI started with `mnemox serve`. The CLI an
 ### Search
 
 - Search findings, notes, evidence metadata, asset metadata, and credential metadata.
+- Search includes manually extracted OCR text from screenshot evidence.
 - Credential secrets are excluded.
 - Filters exist for kind, linked asset, tag, and finding status.
 - Optional semantic mode uses deterministic local embeddings stored only in the encrypted vault metadata cache.
@@ -87,6 +89,7 @@ The primary workflow is the local web UI started with `mnemox serve`. The CLI an
 - Nessus `.nessus` XML import.
 - BloodHound JSON graph/path import as assets and relationship notes.
 - Screenshot folder import.
+- OCR extraction is manual after upload/import and never calls external services.
 
 ## Near-Term Roadmap Order
 

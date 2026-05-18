@@ -68,3 +68,10 @@ export type SearchHit = {
   Excerpt: string;
   Score: number;
 };
+
+export type OCRStatus = {
+  available: boolean;
+  engine: string;
+  version?: string;
+  error?: string;
+};

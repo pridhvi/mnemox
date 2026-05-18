@@ -35,7 +35,7 @@ This is the canonical implementation backlog. Keep it synchronized with code cha
 - [x] Burp issue import.
 - [x] Nessus import.
 - [x] BloodHound path import.
-- [ ] OCR extraction for screenshots.
+- [x] OCR extraction for screenshots.
 
 ## Milestone 4: Search, Recall, And Paths
 

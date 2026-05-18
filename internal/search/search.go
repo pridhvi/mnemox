@@ -81,7 +81,7 @@ func Ranked(records []Record, query string, limit int) []Hit {
 }
 
 func title(payload map[string]any) string {
-	for _, key := range []string{"title", "name", "asset", "value"} {
+	for _, key := range []string{"title", "name", "caption", "asset", "value", "original_path", "text"} {
 		if value, ok := payload[key].(string); ok && value != "" {
 			return value
 		}
@@ -94,7 +94,7 @@ func searchableMaterial(kind string, payload map[string]any) string {
 	parts = append(parts, kind)
 	for _, key := range []string{
 		"title", "name", "value", "type", "asset", "caption", "summary",
-		"technical_details", "impact", "remediation", "validation", "notes", "text",
+		"technical_details", "impact", "remediation", "validation", "notes", "text", "ocr_text",
 	} {
 		if value, ok := payload[key]; ok {
 			parts = append(parts, key+": "+readable(value))
@@ -119,7 +119,7 @@ func weightedFields(payload map[string]any) map[string]int {
 			fields[value] = 5
 		}
 	}
-	for _, key := range []string{"summary", "technical_details", "impact", "remediation", "notes", "text"} {
+	for _, key := range []string{"summary", "technical_details", "impact", "remediation", "notes", "text", "ocr_text"} {
 		if value, ok := payload[key].(string); ok {
 			fields[value] = 3
 		}

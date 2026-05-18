@@ -60,3 +60,23 @@ describe('api finding assets', () => {
     );
   });
 });
+
+describe('api evidence OCR', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('checks OCR status and extracts OCR for evidence', async () => {
+    const fetchMock = vi.fn(async (path: string) => ({
+      ok: true,
+      json: async () => ({ id: 'evidence-1', path }),
+    })) as unknown as typeof fetch;
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.ocrStatus();
+    await api.extractEvidenceOCR('evidence-1');
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/ocr/status', expect.any(Object));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/evidence/evidence-1/ocr', expect.objectContaining({ method: 'POST' }));
+  });
+});

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"mnemox/internal/console"
 	"mnemox/internal/cvss"
 	"mnemox/internal/domain"
+	evidencepkg "mnemox/internal/evidence"
 	"mnemox/internal/importer"
 	"mnemox/internal/packet"
 	"mnemox/internal/vault"
@@ -283,7 +285,25 @@ func (a *App) evidenceCmd() *cobra.Command {
 	add.Flags().StringVar(&kind, "kind", "file", "evidence kind")
 	add.Flags().StringVar(&caption, "caption", "", "evidence caption")
 	add.Flags().StringArrayVar(&tags, "tag", nil, "tag")
-	cmd.AddCommand(add)
+	ocrCmd := &cobra.Command{
+		Use:   "ocr <evidence-id>",
+		Short: "Extract local OCR text from screenshot evidence.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			v, err := a.openVault()
+			if err != nil {
+				return err
+			}
+			defer v.Close()
+			rec, result, err := evidencepkg.ExtractOCR(context.Background(), v, args[0])
+			if err != nil {
+				return fmt.Errorf("%s", evidencepkg.UserMessage(err))
+			}
+			fmt.Printf("Extracted OCR for evidence %s: %d characters\n", rec.ID, len(result.Text))
+			return nil
+		},
+	}
+	cmd.AddCommand(add, ocrCmd)
 	return cmd
 }
 

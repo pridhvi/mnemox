@@ -18,7 +18,7 @@ import {
 import { type DragEvent, type ElementType, type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from './api';
 import { defaultMetrics, metricLabels, metricOptions, metricOrder, metricsFromVector, vectorFromMetrics } from './cvss';
-import type { AssetDetail, AssetDuplicateGroup, AssetDuplicateItem, AttackPath, FindingPayload, FindingRecord, RecordEnvelope, SearchHit } from './types';
+import type { AssetDetail, AssetDuplicateGroup, AssetDuplicateItem, AttackPath, FindingPayload, FindingRecord, OCRStatus, RecordEnvelope, SearchHit } from './types';
 
 type Module = 'findings' | 'assets' | 'evidence' | 'notes' | 'credentials' | 'search' | 'paths' | 'packets' | 'settings';
 
@@ -629,6 +629,8 @@ function EvidenceModule() {
   const [selectedId, setSelectedId] = useState('');
   const [form, setForm] = useState({ kind: 'file', caption: '', original_path: '', tags: '' });
   const [assetToLink, setAssetToLink] = useState('');
+  const [ocrStatus, setOcrStatus] = useState<OCRStatus | null>(null);
+  const [ocrError, setOcrError] = useState('');
 
   async function load() {
     const [evidenceResponse, assetResponse] = await Promise.all([api.evidence(), api.assets()]);
@@ -639,6 +641,7 @@ function EvidenceModule() {
 
   useEffect(() => {
     load();
+    api.ocrStatus().then(setOcrStatus).catch((error) => setOcrError(error.message));
   }, []);
 
   const selected = items.find((item) => item.id === selectedId) || null;
@@ -672,6 +675,19 @@ function EvidenceModule() {
     await load();
   }
 
+  async function extractOCR() {
+    if (!selected) return;
+    setOcrError('');
+    try {
+      const updated = await api.extractEvidenceOCR(selected.id);
+      setItems((current) => current.map((item) => item.id === updated.id ? updated : item));
+      setSelectedId(updated.id);
+    } catch (error) {
+      setOcrError(error instanceof Error ? error.message : String(error));
+      await load();
+    }
+  }
+
   return (
     <section className="module-page two-column">
       <div>
@@ -700,6 +716,7 @@ function EvidenceModule() {
               <input value={form.tags} onChange={(event) => setForm({ ...form, tags: event.target.value })} placeholder="tags" />
               <button className="primary" onClick={save}>Save evidence</button>
             </div>
+            <OCRPanel record={selected} status={ocrStatus} error={ocrError} onExtract={extractOCR} />
             <Panel title="Linked Assets">
               <AssetLinkEditor
                 assets={assets}
@@ -1562,7 +1579,7 @@ function EvidenceCards({ records }: { records: RecordEnvelope[] }) {
 function EvidenceCard({ record }: { record: RecordEnvelope }) {
   const kind = String(record.payload.kind || 'file');
   const caption = String(record.payload.caption || record.payload.original_path || record.id);
-  const isImage = kind === 'screenshot' || /\.(png|jpe?g|webp)$/i.test(String(record.payload.original_path || ''));
+  const isImage = isImageEvidence(record);
   return (
     <div className="evidence-card">
       {isImage ? (
@@ -1581,6 +1598,52 @@ function EvidenceCard({ record }: { record: RecordEnvelope }) {
       </a>
     </div>
   );
+}
+
+export function OCRPanel({
+  record,
+  status,
+  error,
+  onExtract,
+}: {
+  record: RecordEnvelope;
+  status: OCRStatus | null;
+  error?: string;
+  onExtract: () => void;
+}) {
+  const canOCR = isImageEvidence(record);
+  const ocrState = String(record.payload.ocr_status || 'not_run');
+  const text = String(record.payload.ocr_text || '');
+  const unavailable = status && !status.available;
+  return (
+    <Panel title="OCR">
+      <div className="ocr-panel">
+        <div className="ocr-status-row">
+          <span className={`status-pill ${ocrState}`}>{ocrState}</span>
+          <small>{status?.version || status?.engine || 'tesseract'}</small>
+        </div>
+        {!canOCR && <p className="muted">OCR is available for screenshot and image evidence.</p>}
+        {unavailable && <p className="muted">{status?.error || 'Install tesseract to enable local OCR.'}</p>}
+        {error && <div className="notice error">{error}</div>}
+        <button className="primary full" onClick={onExtract} disabled={!canOCR || !!unavailable}>
+          Extract OCR
+        </button>
+        {text && (
+          <>
+            <textarea className="ocr-text" readOnly value={text} />
+            <button onClick={() => navigator.clipboard.writeText(text)}>
+              <Clipboard size={14} /> Copy OCR text
+            </button>
+          </>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
+function isImageEvidence(record: RecordEnvelope) {
+  const kind = String(record.payload.kind || 'file');
+  return kind === 'screenshot' || /\.(png|jpe?g|webp|gif|bmp|tiff?)$/i.test(String(record.payload.original_path || ''));
 }
 
 function EmptyState({ title }: { title: string }) {

@@ -1,4 +1,4 @@
-import type { AssetDetail, AssetDuplicateGroup, AttackPath, FindingPayload, FindingRecord, RecordEnvelope, SearchHit } from './types';
+import type { AssetDetail, AssetDuplicateGroup, AttackPath, FindingPayload, FindingRecord, OCRStatus, RecordEnvelope, SearchHit } from './types';
 
 export type ImportResult = { assets: number; findings: number; evidence: number; notes?: number };
 
@@ -60,9 +60,12 @@ export const api = {
   importBloodHound: (form: FormData) => request<ImportResult>('/api/import/bloodhound', { method: 'POST', body: form }),
   importScreenshots: (path: string) =>
     request<ImportResult>('/api/import/screenshots', { method: 'POST', body: JSON.stringify({ path }) }),
+  ocrStatus: () => request<OCRStatus>('/api/ocr/status'),
   evidence: () => request<{ items: RecordEnvelope[] }>('/api/evidence'),
   updateEvidence: (id: string, payload: { kind: string; caption: string; original_path: string; tags: string[] }) =>
     request<RecordEnvelope>(`/api/evidence/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
+  extractEvidenceOCR: (id: string) =>
+    request<RecordEnvelope>(`/api/evidence/${id}/ocr`, { method: 'POST' }),
   linkEvidenceAsset: (id: string, assetId: string) =>
     request<{ items: RecordEnvelope[] }>(`/api/evidence/${id}/assets`, { method: 'POST', body: JSON.stringify({ asset_id: assetId }) }),
   unlinkEvidenceAsset: (id: string, assetId: string) =>

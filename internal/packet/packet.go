@@ -152,6 +152,9 @@ func RenderCitationBundle(v *vault.Vault, findingID string, options CitationBund
 			if blobID := value(item.Payload, "blob_id", ""); blobID != "" {
 				fmt.Fprintf(&b, " Blob: `%s`.", blobID)
 			}
+			if excerpt := ocrExcerpt(value(item.Payload, "ocr_text", "")); excerpt != "" {
+				fmt.Fprintf(&b, " OCR excerpt: %s.", excerpt)
+			}
 			b.WriteString("\n")
 		}
 		b.WriteString("\n")
@@ -251,6 +254,18 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func ocrExcerpt(value string) string {
+	value = strings.Join(strings.Fields(value), " ")
+	if value == "" {
+		return ""
+	}
+	if len(value) > 240 {
+		value = strings.TrimSpace(value[:240]) + "..."
+	}
+	value = strings.ReplaceAll(value, "`", "'")
+	return "`" + value + "`"
 }
 
 func indent(value string) string {

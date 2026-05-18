@@ -8,6 +8,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -368,6 +369,73 @@ func TestBulkSetFindingAssetsSyncsAffectedScope(t *testing.T) {
 	}
 }
 
+func TestEvidenceOCRStatusUnavailableAndNonImageRejected(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	root := filepath.Join(t.TempDir(), ".mnemox")
+	v, err := vault.CreateWithPassphrase(root, "ACME", "test-passphrase")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = v.Close()
+
+	server := New(Options{VaultPath: root, Addr: "127.0.0.1:0"})
+	ts := httptest.NewServer(server.routes())
+	defer ts.Close()
+
+	postJSON(t, ts.URL+"/api/unlock", map[string]any{"passphrase": "test-passphrase"}, http.StatusOK)
+	status := getJSON(t, ts.URL+"/api/ocr/status", http.StatusOK)
+	if status["available"].(bool) {
+		t.Fatalf("expected unavailable OCR status: %#v", status)
+	}
+	finding := postJSON(t, ts.URL+"/api/findings", map[string]any{"title": "Evidence OCR"}, http.StatusCreated)
+	evidence := uploadTextEvidence(t, ts.URL+"/api/findings/"+finding["id"].(string)+"/evidence")
+	result := postJSON(t, ts.URL+"/api/evidence/"+evidence["id"].(string)+"/ocr", map[string]any{}, http.StatusUnsupportedMediaType)
+	if !strings.Contains(result["error"].(string), "image evidence") {
+		t.Fatalf("expected image-only OCR error: %#v", result)
+	}
+}
+
+func TestEvidenceOCRWithFakeTesseractUpdatesSearchAndCitationBundle(t *testing.T) {
+	binDir := t.TempDir()
+	tesseract := filepath.Join(binDir, "tesseract")
+	if err := os.WriteFile(tesseract, []byte("#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'tesseract 5.3.0'; exit 0; fi\necho 'Jenkins console output anonymous read visible'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir)
+	root := filepath.Join(t.TempDir(), ".mnemox")
+	v, err := vault.CreateWithPassphrase(root, "ACME", "test-passphrase")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = v.Close()
+
+	server := New(Options{VaultPath: root, Addr: "127.0.0.1:0"})
+	ts := httptest.NewServer(server.routes())
+	defer ts.Close()
+
+	postJSON(t, ts.URL+"/api/unlock", map[string]any{"passphrase": "test-passphrase"}, http.StatusOK)
+	status := getJSON(t, ts.URL+"/api/ocr/status", http.StatusOK)
+	if !status["available"].(bool) || !strings.Contains(status["version"].(string), "tesseract 5.3.0") {
+		t.Fatalf("expected fake tesseract status: %#v", status)
+	}
+	finding := postJSON(t, ts.URL+"/api/findings", map[string]any{"title": "Evidence OCR"}, http.StatusCreated)
+	evidence := uploadEvidence(t, ts.URL+"/api/findings/"+finding["id"].(string)+"/evidence")
+	updated := postJSON(t, ts.URL+"/api/evidence/"+evidence["id"].(string)+"/ocr", map[string]any{}, http.StatusOK)
+	payload := updated["payload"].(map[string]any)
+	if payload["ocr_status"] != "complete" || !strings.Contains(payload["ocr_text"].(string), "anonymous read") {
+		t.Fatalf("expected OCR metadata: %#v", updated)
+	}
+	search := getJSON(t, ts.URL+"/api/search?q=anonymous+read&kind=evidence", http.StatusOK)
+	encoded, _ := json.Marshal(search)
+	if !strings.Contains(strings.ToLower(string(encoded)), "jenkins console output") {
+		t.Fatalf("expected OCR text to be searchable: %s", encoded)
+	}
+	bundle := getJSON(t, ts.URL+"/api/findings/"+finding["id"].(string)+"/citation-bundle", http.StatusOK)
+	if !strings.Contains(bundle["markdown"].(string), "OCR excerpt") || !strings.Contains(bundle["markdown"].(string), "anonymous read") {
+		t.Fatalf("expected OCR excerpt in citation bundle: %s", bundle["markdown"])
+	}
+}
+
 func TestWebImportEndpointsForBurpNessusAndBloodHound(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".mnemox")
 	v, err := vault.CreateWithPassphrase(root, "ACME", "test-passphrase")
@@ -471,6 +539,28 @@ func uploadEvidence(t *testing.T, url string) map[string]any {
 	_, _ = part.Write(png)
 	_ = writer.WriteField("caption", "Dashboard visible without authentication")
 	_ = writer.WriteField("kind", "screenshot")
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	req, err := http.NewRequest(http.MethodPost, url, &body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	return doJSON(t, req, http.StatusCreated)
+}
+
+func uploadTextEvidence(t *testing.T, url string) map[string]any {
+	t.Helper()
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "jenkins.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = part.Write([]byte("not an image"))
+	_ = writer.WriteField("caption", "Text proof")
+	_ = writer.WriteField("kind", "file")
 	if err := writer.Close(); err != nil {
 		t.Fatal(err)
 	}

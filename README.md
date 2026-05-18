@@ -66,6 +66,7 @@ By default, Mnemox uses `.mnemox/` in the current directory. Set
 - `asset add/list`: create and list assets.
 - `note`: add an operator note.
 - `evidence add`: encrypt and attach a file as evidence.
+- `evidence ocr`: manually extract local OCR text from screenshot evidence when `tesseract` is installed.
 - `cred add`: add an encrypted credential record.
 - `import nmap`: import Nmap XML hosts/services as assets.
 - `import nuclei`: import nuclei JSONL findings and assets.
@@ -91,6 +92,10 @@ This MVP performs local recall over decrypted records at runtime. It does not
 send data to an external AI service. Search supports ranked keyword/fuzzy
 matching and an optional local semantic mode backed by an encrypted vault cache,
 with credential secrets excluded from searchable material.
+
+Screenshot OCR is manual and local-only. If the optional `tesseract` binary is
+available on `PATH`, Mnemox can extract text from image evidence and store it as
+encrypted evidence metadata for search and citation bundles.
 
 ## Backlog And Releases
 

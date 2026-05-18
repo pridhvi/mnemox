@@ -19,6 +19,7 @@ import (
 
 	"mnemox/internal/cvss"
 	"mnemox/internal/domain"
+	evidencepkg "mnemox/internal/evidence"
 	"mnemox/internal/importer"
 	"mnemox/internal/packet"
 	"mnemox/internal/vault"
@@ -101,8 +102,10 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/import/nessus", s.requireUnlock(s.handleImportNessus))
 	mux.HandleFunc("POST /api/import/bloodhound", s.requireUnlock(s.handleImportBloodHound))
 	mux.HandleFunc("POST /api/import/screenshots", s.requireUnlock(s.handleImportScreenshots))
+	mux.HandleFunc("GET /api/ocr/status", s.requireUnlock(s.handleOCRStatus))
 	mux.HandleFunc("GET /api/evidence", s.requireUnlock(s.handleListEvidence))
 	mux.HandleFunc("PUT /api/evidence/{id}", s.requireUnlock(s.handleUpdateEvidence))
+	mux.HandleFunc("POST /api/evidence/{id}/ocr", s.requireUnlock(s.handleEvidenceOCR))
 	mux.HandleFunc("GET /api/evidence/{id}/download", s.requireUnlock(s.handleDownloadEvidence))
 	mux.HandleFunc("GET /api/evidence/{id}/preview", s.requireUnlock(s.handlePreviewEvidence))
 	mux.HandleFunc("POST /api/evidence/{id}/assets", s.requireUnlock(s.handleLinkEvidenceAsset))
@@ -683,6 +686,10 @@ func (s *Server) handleImportScreenshots(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, result)
 }
 
+func (s *Server) handleOCRStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, evidencepkg.OCRStatus(r.Context()))
+}
+
 func (s *Server) handleImportFile(w http.ResponseWriter, r *http.Request, fn func(*vault.Vault, string) (importer.Result, error)) {
 	if err := r.ParseMultipartForm(64 << 20); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -756,6 +763,21 @@ func (s *Server) handleUpdateEvidence(w http.ResponseWriter, r *http.Request) {
 	updated, _ := v.GetRecord(rec.ID)
 	response := recordResponse(updated)
 	assets, _ := v.Linked(updated.ID, "evidence_asset")
+	response["assets"] = recordList(assets, false)
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (s *Server) handleEvidenceOCR(w http.ResponseWriter, r *http.Request) {
+	updated, result, err := evidencepkg.ExtractOCR(r.Context(), s.currentVault(), r.PathValue("id"))
+	if err != nil {
+		writeJSON(w, evidencepkg.ErrorStatus(err), map[string]any{
+			"error": evidencepkg.UserMessage(err),
+			"ocr":   result,
+		})
+		return
+	}
+	response := recordResponse(updated)
+	assets, _ := s.currentVault().Linked(updated.ID, "evidence_asset")
 	response["assets"] = recordList(assets, false)
 	writeJSON(w, http.StatusOK, response)
 }
