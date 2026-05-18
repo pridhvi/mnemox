@@ -405,13 +405,14 @@ function FindingWorkspace() {
                       {metricOptions[metric].map((option) => (
                         <button
                           key={option.value}
+                          aria-label={`${metricLabels[metric]}: ${option.label} (${option.value})`}
                           className={metrics[metric] === option.value ? 'active' : ''}
                           onClick={() => {
                             setVector('');
                             setMetrics({ ...metrics, [metric]: option.value });
                           }}
                         >
-                          {option.value}
+                          {option.label}
                         </button>
                       ))}
                     </div>
