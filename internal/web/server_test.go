@@ -310,6 +310,64 @@ func TestAssetMergeMovesRelationsAndRedactsCredentialContext(t *testing.T) {
 	}
 }
 
+func TestBulkSetFindingAssetsSyncsAffectedScope(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".mnemox")
+	v, err := vault.CreateWithPassphrase(root, "ACME", "test-passphrase")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = v.Close()
+
+	server := New(Options{VaultPath: root, Addr: "127.0.0.1:0"})
+	ts := httptest.NewServer(server.routes())
+	defer ts.Close()
+
+	postJSON(t, ts.URL+"/api/unlock", map[string]any{"passphrase": "test-passphrase"}, http.StatusOK)
+	finding := postJSON(t, ts.URL+"/api/findings", map[string]any{
+		"title": "Imported TLS issue",
+	}, http.StatusCreated)
+	first := postJSON(t, ts.URL+"/api/assets", map[string]any{
+		"name":  "legacy.acme.local",
+		"type":  "host",
+		"value": "10.0.0.20",
+		"tags":  []string{"manual"},
+	}, http.StatusCreated)
+	second := postJSON(t, ts.URL+"/api/assets", map[string]any{
+		"name":  "scanner.acme.local",
+		"type":  "host",
+		"value": "10.0.0.21",
+		"tags":  []string{"import:nmap"},
+	}, http.StatusCreated)
+	findingID := finding["id"].(string)
+	firstID := first["id"].(string)
+	secondID := second["id"].(string)
+
+	postJSON(t, ts.URL+"/api/findings/"+findingID+"/assets", map[string]any{"asset_id": firstID}, http.StatusOK)
+	updated := putJSON(t, ts.URL+"/api/findings/"+findingID+"/assets", map[string]any{
+		"asset_ids":  []string{secondID, secondID},
+		"sync_scope": true,
+	}, http.StatusOK)
+	if len(updated["assets"].([]any)) != 1 {
+		t.Fatalf("expected one bulk linked asset: %#v", updated)
+	}
+	asset := updated["assets"].([]any)[0].(map[string]any)
+	if asset["id"] != secondID {
+		t.Fatalf("expected imported asset to replace manual link: %#v", updated)
+	}
+	scope := updated["payload"].(map[string]any)["affected_scope"].([]any)
+	if len(scope) != 1 || scope[0] != "scanner.acme.local (10.0.0.21)" {
+		t.Fatalf("expected affected scope synced from selected asset: %#v", updated)
+	}
+	firstRelated := getJSON(t, ts.URL+"/api/search?asset_id="+firstID+"&kind=finding", http.StatusOK)
+	if len(firstRelated["items"].([]any)) != 0 {
+		t.Fatalf("expected old asset link removed: %#v", firstRelated)
+	}
+	secondRelated := getJSON(t, ts.URL+"/api/search?asset_id="+secondID+"&kind=finding", http.StatusOK)
+	if len(secondRelated["items"].([]any)) != 1 {
+		t.Fatalf("expected new asset link searchable: %#v", secondRelated)
+	}
+}
+
 func TestWebImportEndpointsForBurpNessusAndBloodHound(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".mnemox")
 	v, err := vault.CreateWithPassphrase(root, "ACME", "test-passphrase")

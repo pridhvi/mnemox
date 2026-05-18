@@ -82,6 +82,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/findings", s.requireUnlock(s.handleCreateFinding))
 	mux.HandleFunc("GET /api/findings/{id}", s.requireUnlock(s.handleGetFinding))
 	mux.HandleFunc("PUT /api/findings/{id}", s.requireUnlock(s.handleUpdateFinding))
+	mux.HandleFunc("PUT /api/findings/{id}/assets", s.requireUnlock(s.handleSetFindingAssets))
 	mux.HandleFunc("POST /api/findings/{id}/assets", s.requireUnlock(s.handleLinkFindingAsset))
 	mux.HandleFunc("DELETE /api/findings/{id}/assets/{asset_id}", s.requireUnlock(s.handleUnlinkFindingAsset))
 	mux.HandleFunc("POST /api/findings/{id}/notes", s.requireUnlock(s.handleAddFindingNote))
@@ -273,16 +274,7 @@ func (s *Server) handleGetFinding(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	notes, _ := v.Linked(rec.ID, "has_note")
-	evidence, _ := v.Linked(rec.ID, "has_evidence")
-	assets, _ := v.Linked(rec.ID, "affects_asset")
-	response := recordResponse(rec)
-	response["notes"] = recordList(notes, false)
-	response["evidence"] = recordList(evidence, false)
-	response["assets"] = recordList(assets, false)
-	markdown, _ := packet.Render(v, rec.ID)
-	response["packet_markdown"] = markdown
-	writeJSON(w, http.StatusOK, response)
+	writeJSON(w, http.StatusOK, findingDetailResponse(v, rec))
 }
 
 func (s *Server) handleUpdateFinding(w http.ResponseWriter, r *http.Request) {
@@ -325,6 +317,78 @@ func (s *Server) handleLinkFindingAsset(w http.ResponseWriter, r *http.Request) 
 	}
 	assets, _ := s.currentVault().Linked(r.PathValue("id"), "affects_asset")
 	writeJSON(w, http.StatusOK, map[string]any{"items": recordList(assets, false)})
+}
+
+func (s *Server) handleSetFindingAssets(w http.ResponseWriter, r *http.Request) {
+	v := s.currentVault()
+	finding, err := v.GetRecord(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if finding.Kind != "finding" {
+		writeError(w, http.StatusBadRequest, "record is not a finding")
+		return
+	}
+	var body struct {
+		AssetIDs  []string `json:"asset_ids"`
+		SyncScope bool     `json:"sync_scope"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	assetIDs := uniqueStrings(body.AssetIDs)
+	assetRecords := make([]vault.Record, 0, len(assetIDs))
+	for _, assetID := range assetIDs {
+		asset, err := v.GetRecord(assetID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if asset.Kind != "asset" {
+			writeError(w, http.StatusBadRequest, "target record is not an asset")
+			return
+		}
+		assetRecords = append(assetRecords, asset)
+	}
+	current, err := v.Linked(finding.ID, "affects_asset")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	wanted := make(map[string]bool, len(assetIDs))
+	for _, assetID := range assetIDs {
+		wanted[assetID] = true
+	}
+	currentIDs := make(map[string]bool, len(current))
+	for _, asset := range current {
+		currentIDs[asset.ID] = true
+		if !wanted[asset.ID] {
+			if err := v.RemoveLink(finding.ID, asset.ID, "affects_asset"); err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+		}
+	}
+	for _, assetID := range assetIDs {
+		if !currentIDs[assetID] {
+			if err := v.AddLink(finding.ID, assetID, "affects_asset"); err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+		}
+	}
+	if body.SyncScope {
+		next := cloneMap(finding.Payload)
+		next["affected_scope"] = assetScopeValues(assetRecords)
+		if err := v.UpdateRecord(finding.ID, next); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		finding, _ = v.GetRecord(finding.ID)
+	}
+	writeJSON(w, http.StatusOK, findingDetailResponse(v, finding))
 }
 
 func (s *Server) handleUnlinkFindingAsset(w http.ResponseWriter, r *http.Request) {
@@ -1585,6 +1649,19 @@ func recordListWithAssets(v *vault.Vault, records []vault.Record, redactCredenti
 	return items
 }
 
+func findingDetailResponse(v *vault.Vault, rec vault.Record) map[string]any {
+	notes, _ := v.Linked(rec.ID, "has_note")
+	evidence, _ := v.Linked(rec.ID, "has_evidence")
+	assets, _ := v.Linked(rec.ID, "affects_asset")
+	response := recordResponse(rec)
+	response["notes"] = recordList(notes, false)
+	response["evidence"] = recordList(evidence, false)
+	response["assets"] = recordList(assets, false)
+	markdown, _ := packet.Render(v, rec.ID)
+	response["packet_markdown"] = markdown
+	return response
+}
+
 func recordResponse(rec vault.Record) map[string]any {
 	return sanitizeRecord(rec, false)
 }
@@ -1659,6 +1736,37 @@ func asStringSlice(v any) []string {
 	default:
 		return []string{}
 	}
+}
+
+func uniqueStrings(values []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out
+}
+
+func assetScopeValues(records []vault.Record) []string {
+	out := make([]string, 0, len(records))
+	for _, rec := range records {
+		name := strings.TrimSpace(asString(rec.Payload["name"]))
+		value := strings.TrimSpace(asString(rec.Payload["value"]))
+		switch {
+		case name != "" && value != "" && !strings.EqualFold(name, value):
+			out = append(out, name+" ("+value+")")
+		case name != "":
+			out = append(out, name)
+		case value != "":
+			out = append(out, value)
+		}
+	}
+	return out
 }
 
 func splitCSV(value string) []string {

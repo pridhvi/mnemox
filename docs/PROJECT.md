@@ -30,6 +30,7 @@ The primary workflow is the local web UI started with `mnemox serve`. The CLI an
 
 - List, create, and edit findings.
 - Link/unlink affected assets.
+- Bulk edit affected assets from imported scan data and optionally sync affected scope from selected assets.
 - CVSS v4.0 Base calculator with live vector and score.
 - Add notes tied to a finding.
 - Upload evidence tied to a finding, including drag-and-drop evidence attach.

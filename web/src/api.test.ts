@@ -36,3 +36,27 @@ describe('api search', () => {
     );
   });
 });
+
+describe('api finding assets', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('replaces affected assets with sync scope option', async () => {
+    const fetchMock = vi.fn(async (path: string) => ({
+      ok: true,
+      json: async () => ({ id: 'finding-1', path }),
+    })) as unknown as typeof fetch;
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.setFindingAssets('finding-1', ['asset-1', 'asset-2'], true);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/findings/finding-1/assets',
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({ asset_ids: ['asset-1', 'asset-2'], sync_scope: true }),
+      }),
+    );
+  });
+});

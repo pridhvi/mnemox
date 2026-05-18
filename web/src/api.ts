@@ -33,6 +33,8 @@ export const api = {
     request<FindingRecord>(`/api/findings/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
   linkFindingAsset: (id: string, assetId: string) =>
     request<{ items: RecordEnvelope[] }>(`/api/findings/${id}/assets`, { method: 'POST', body: JSON.stringify({ asset_id: assetId }) }),
+  setFindingAssets: (id: string, assetIds: string[], syncScope: boolean) =>
+    request<FindingRecord>(`/api/findings/${id}/assets`, { method: 'PUT', body: JSON.stringify({ asset_ids: assetIds, sync_scope: syncScope }) }),
   unlinkFindingAsset: (id: string, assetId: string) =>
     request<{ items: RecordEnvelope[] }>(`/api/findings/${id}/assets/${assetId}`, { method: 'DELETE' }),
   addNote: (id: string, payload: { text: string; asset: string; tags: string[] }) =>

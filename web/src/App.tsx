@@ -190,7 +190,10 @@ function FindingWorkspace() {
   const [metrics, setMetrics] = useState(defaultMetrics());
   const [vector, setVector] = useState('');
   const [cvssNotes, setCvssNotes] = useState('');
-  const [assetToLink, setAssetToLink] = useState('');
+  const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([]);
+  const [assetFilter, setAssetFilter] = useState('');
+  const [syncAssetScope, setSyncAssetScope] = useState(true);
+  const [assetBulkMessage, setAssetBulkMessage] = useState('');
   const [error, setError] = useState('');
 
   const loadFindings = useCallback(async () => {
@@ -216,6 +219,8 @@ function FindingWorkspace() {
     setMetrics({ ...defaultMetrics(), ...existingMetrics });
     setVector(response.payload.cvss?.vector || '');
     setCvssNotes(response.payload.cvss?.notes || '');
+    setSelectedAssetIds((response.assets || []).map((asset) => asset.id));
+    setAssetBulkMessage('');
   }, [selectedId]);
 
   useEffect(() => {
@@ -284,17 +289,15 @@ function FindingWorkspace() {
     selectEvidenceFile(event.dataTransfer.files?.[0] || null);
   }
 
-  async function linkAsset() {
-    if (!selectedId || !assetToLink) return;
-    await api.linkFindingAsset(selectedId, assetToLink);
-    setAssetToLink('');
-    await loadDetail();
-  }
-
-  async function unlinkAsset(assetId: string) {
+  async function saveAffectedAssets() {
     if (!selectedId) return;
-    await api.unlinkFindingAsset(selectedId, assetId);
-    await loadDetail();
+    const updated = await api.setFindingAssets(selectedId, selectedAssetIds, syncAssetScope);
+    setDetail(updated);
+    setForm(updated.payload);
+    setScopeText(listToText(updated.payload.affected_scope));
+    setSelectedAssetIds((updated.assets || []).map((asset) => asset.id));
+    setAssetBulkMessage(`Saved ${updated.assets?.length || 0} affected assets.`);
+    await loadFindings();
   }
 
   async function scoreCvss() {
@@ -302,6 +305,28 @@ function FindingWorkspace() {
     await api.scoreCvss(selectedId, { vector: vector || undefined, metrics, notes: cvssNotes });
     await loadFindings();
     await loadDetail();
+  }
+
+  const filteredAssets = useMemo(() => {
+    const query = assetFilter.trim().toLowerCase();
+    if (!query) return allAssets;
+    return allAssets.filter((asset) => assetSearchText(asset).includes(query));
+  }, [allAssets, assetFilter]);
+
+  function toggleAssetSelection(assetId: string) {
+    setSelectedAssetIds((current) => current.includes(assetId) ? current.filter((id) => id !== assetId) : [...current, assetId]);
+    setAssetBulkMessage('');
+  }
+
+  function selectFilteredAssets() {
+    setSelectedAssetIds((current) => Array.from(new Set([...current, ...filteredAssets.map((asset) => asset.id)])));
+    setAssetBulkMessage('');
+  }
+
+  function clearFilteredAssets() {
+    const filteredIds = new Set(filteredAssets.map((asset) => asset.id));
+    setSelectedAssetIds((current) => current.filter((assetId) => !filteredIds.has(assetId)));
+    setAssetBulkMessage('');
   }
 
   async function copyPacket() {
@@ -399,23 +424,41 @@ function FindingWorkspace() {
             </Panel>
 
             <Panel title="Affected Assets">
-              <div className="asset-linker">
-                <select value={assetToLink} onChange={(event) => setAssetToLink(event.target.value)}>
-                  <option value="">Select asset</option>
-                  {allAssets.map((asset) => (
-                    <option key={asset.id} value={asset.id}>
-                      {String(asset.payload.name || asset.payload.value)}
-                    </option>
+              <div className="bulk-asset-editor">
+                <input
+                  value={assetFilter}
+                  onChange={(event) => setAssetFilter(event.target.value)}
+                  placeholder="Filter imported assets, tags, host, URL"
+                />
+                <div className="bulk-asset-toolbar">
+                  <span>{selectedAssetIds.length} selected · {filteredAssets.length} shown</span>
+                  <button type="button" onClick={selectFilteredAssets}>Select shown</button>
+                  <button type="button" onClick={clearFilteredAssets}>Clear shown</button>
+                </div>
+                <div className="bulk-asset-list">
+                  {filteredAssets.map((asset) => (
+                    <label key={asset.id} className="bulk-asset-row">
+                      <input
+                        type="checkbox"
+                        checked={selectedAssetIds.includes(asset.id)}
+                        onChange={() => toggleAssetSelection(asset.id)}
+                      />
+                      <span>
+                        <strong>{assetLabel(asset)}</strong>
+                        <small>{assetSummary(asset)}</small>
+                      </span>
+                    </label>
                   ))}
-                </select>
-                <button onClick={linkAsset}>Link</button>
+                </div>
+                <label className="check-row">
+                  <input type="checkbox" checked={syncAssetScope} onChange={(event) => setSyncAssetScope(event.target.checked)} />
+                  <span>Sync affected scope from selected assets</span>
+                </label>
+                <button className="primary full" onClick={saveAffectedAssets}>Save affected assets</button>
+                {assetBulkMessage && <p className="muted">{assetBulkMessage}</p>}
               </div>
               <div className="chip-list">
-                {(detail.assets || []).map((asset) => (
-                  <button key={asset.id} onClick={() => unlinkAsset(asset.id)} title="Unlink asset">
-                    {String(asset.payload.name || asset.payload.value)}
-                  </button>
-                ))}
+                {(detail.assets || []).map((asset) => <span key={asset.id} className="static-chip">{assetLabel(asset)}</span>)}
               </div>
             </Panel>
 
@@ -1704,6 +1747,24 @@ function recordTitle(record: RecordEnvelope) {
 
 function assetLabel(record: RecordEnvelope) {
   return String(record.payload.name || record.payload.value || record.id);
+}
+
+function assetSummary(record: RecordEnvelope) {
+  return [
+    record.payload.type,
+    record.payload.value,
+    ...(Array.isArray(record.payload.tags) ? record.payload.tags : []),
+  ].filter(Boolean).join(' · ');
+}
+
+function assetSearchText(record: RecordEnvelope) {
+  return [
+    assetLabel(record),
+    record.payload.type,
+    record.payload.value,
+    record.payload.notes,
+    ...(Array.isArray(record.payload.tags) ? record.payload.tags : []),
+  ].filter(Boolean).join(' ').toLowerCase();
 }
 
 function relationSummary(record: RecordEnvelope) {

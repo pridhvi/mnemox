@@ -632,6 +632,69 @@ label.compact textarea {
   gap: 8px;
 }
 
+.bulk-asset-editor {
+  display: grid;
+  gap: 8px;
+}
+
+.bulk-asset-toolbar {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.bulk-asset-toolbar span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.bulk-asset-list {
+  display: grid;
+  gap: 6px;
+  max-height: 230px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.bulk-asset-row {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  gap: 8px;
+  align-items: start;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.bulk-asset-row input {
+  margin-top: 2px;
+}
+
+.bulk-asset-row span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.bulk-asset-row strong,
+.bulk-asset-row small {
+  overflow-wrap: anywhere;
+}
+
+.bulk-asset-row small {
+  color: var(--muted);
+}
+
+.check-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .chip-list {
   display: flex;
   flex-wrap: wrap;

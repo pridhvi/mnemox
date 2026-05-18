@@ -21,7 +21,7 @@ This is the canonical implementation backlog. Keep it synchronized with code cha
 - [x] Credential module metadata edit plus asset link/unlink.
 - [x] Loading/error states for primary web modules.
 - [x] Notes module detail/edit workflow.
-- [ ] Bulk edit affected assets from imported scan data.
+- [x] Bulk edit affected assets from imported scan data.
 - [x] Drag-and-drop evidence upload.
 - [x] Inline Markdown preview for long-form finding fields.
 
