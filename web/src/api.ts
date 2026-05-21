@@ -1,6 +1,7 @@
-import type { AssetDetail, AssetDuplicateGroup, AttackPath, FindingPayload, FindingRecord, OCRStatus, RecordEnvelope, SearchHit } from './types';
+import type { AssetDetail, AssetDuplicateGroup, AttackPath, CvssState, FindingPayload, FindingRecord, OCRStatus, RecordEnvelope, SearchHit } from './types';
 
 export type ImportResult = { assets: number; findings: number; evidence: number; notes?: number };
+export type CvssScorePayload = { vector?: string; metrics?: Record<string, string>; notes?: string };
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(path, {
@@ -41,8 +42,10 @@ export const api = {
     request<RecordEnvelope>(`/api/findings/${id}/notes`, { method: 'POST', body: JSON.stringify(payload) }),
   uploadEvidence: (id: string, form: FormData) =>
     request<RecordEnvelope>(`/api/findings/${id}/evidence`, { method: 'POST', body: form }),
-  scoreCvss: (id: string, payload: { vector?: string; metrics?: Record<string, string>; notes: string }) =>
-    request(`/api/findings/${id}/cvss`, { method: 'POST', body: JSON.stringify(payload) }),
+  scoreCvss: (id: string, payload: CvssScorePayload) =>
+    request<CvssState>(`/api/findings/${id}/cvss`, { method: 'POST', body: JSON.stringify(payload) }),
+  previewCvss: (payload: CvssScorePayload) =>
+    request<CvssState>('/api/cvss/preview', { method: 'POST', body: JSON.stringify(payload) }),
   packet: (id: string) => request<{ markdown: string }>(`/api/findings/${id}/packet`),
   citationBundle: (id: string, assetId = '') =>
     request<{ markdown: string }>(`/api/findings/${id}/citation-bundle${assetId ? `?asset_id=${encodeURIComponent(assetId)}` : ''}`),

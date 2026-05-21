@@ -1,5 +1,6 @@
 import {
   AlertTriangle,
+  CircleHelp,
   Clipboard,
   Download,
   FileText,
@@ -7,20 +8,23 @@ import {
   HardDrive,
   KeyRound,
   Lock,
+  Moon,
   Plus,
   Save,
   Search,
   Settings,
   ShieldCheck,
+  Sun,
   StickyNote,
   Upload,
 } from 'lucide-react';
-import { type DragEvent, type ElementType, type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
+import { type DragEvent, type ElementType, type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api';
 import { defaultMetrics, metricLabels, metricOptions, metricOrder, metricsFromVector, vectorFromMetrics } from './cvss';
-import type { AssetDetail, AssetDuplicateGroup, AssetDuplicateItem, AttackPath, FindingPayload, FindingRecord, OCRStatus, RecordEnvelope, SearchHit } from './types';
+import type { AssetDetail, AssetDuplicateGroup, AssetDuplicateItem, AttackPath, CvssState, FindingPayload, FindingRecord, OCRStatus, RecordEnvelope, SearchHit } from './types';
 
 type Module = 'findings' | 'assets' | 'evidence' | 'notes' | 'credentials' | 'search' | 'paths' | 'packets' | 'settings';
+type Theme = 'dark' | 'light';
 
 const modules: Array<{ id: Module; label: string; icon: ElementType }> = [
   { id: 'findings', label: 'Findings', icon: FileText },
@@ -48,10 +52,18 @@ const emptyFinding: FindingPayload = {
   open_questions: [],
 };
 
+function initialTheme(): Theme {
+  if (typeof window === 'undefined') return 'dark';
+  const saved = window.localStorage.getItem('mnemox-theme');
+  if (saved === 'dark' || saved === 'light') return saved;
+  return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+}
+
 export function App() {
   const [unlocked, setUnlocked] = useState(false);
   const [vaultPath, setVaultPath] = useState('');
   const [active, setActive] = useState<Module>('findings');
+  const [theme, setTheme] = useState<Theme>(() => initialTheme());
   const [error, setError] = useState('');
   const [refreshKey, setRefreshKey] = useState(0);
 
@@ -64,6 +76,12 @@ export function App() {
   useEffect(() => {
     refreshStatus().catch((err) => setError(err.message));
   }, [refreshStatus]);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.style.colorScheme = theme;
+    window.localStorage.setItem('mnemox-theme', theme);
+  }, [theme]);
 
   async function lock() {
     await api.lock();
@@ -78,7 +96,7 @@ export function App() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
-          <div className="mark">M</div>
+          <LogoMark />
           <div>
             <strong>Mnemox</strong>
             <span>Engagement memory</span>
@@ -96,6 +114,10 @@ export function App() {
           })}
         </nav>
         <div className="sidebar-footer">
+          <button className="theme-toggle" type="button" onClick={() => setTheme((current) => current === 'dark' ? 'light' : 'dark')}>
+            {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
+            {theme === 'dark' ? 'Light mode' : 'Dark mode'}
+          </button>
           <span title={vaultPath}>{vaultPath}</span>
           <button className="ghost" onClick={lock}>
             <Lock size={15} /> Lock
@@ -115,6 +137,19 @@ export function App() {
         {active === 'settings' && <SettingsModule onLock={lock} />}
       </main>
     </div>
+  );
+}
+
+function LogoMark() {
+  return (
+    <svg className="mark" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
+      <rect className="mark-frame" x="4" y="4" width="56" height="56" rx="15" />
+      <path className="mark-left" d="M30 22 18 13c-4-3-8 0-8 5v28c0 5 4 8 8 5l12-9" />
+      <path className="mark-right" d="M34 22 46 13c4-3 8 0 8 5v28c0 5-4 8-8 5l-12-9" />
+      <path className="mark-link" d="M32 29v6" />
+      <circle className="mark-node mark-node-blue" cx="32" cy="25" r="5.5" />
+      <circle className="mark-node mark-node-green" cx="32" cy="39" r="5.5" />
+    </svg>
   );
 }
 
@@ -141,7 +176,7 @@ function UnlockScreen({ vaultPath, onUnlocked }: { vaultPath: string; onUnlocked
     <div className="unlock-screen">
       <form className="unlock-card" onSubmit={submit}>
         <div className="brand large">
-          <div className="mark">M</div>
+          <LogoMark />
           <div>
             <strong>Mnemox</strong>
             <span>Local evidence memory</span>
@@ -177,6 +212,9 @@ function FindingWorkspace() {
   const [findings, setFindings] = useState<FindingRecord[]>([]);
   const [selectedId, setSelectedId] = useState('');
   const [detail, setDetail] = useState<FindingRecord | null>(null);
+  const [newFindingOpen, setNewFindingOpen] = useState(false);
+  const [newFindingTitle, setNewFindingTitle] = useState('');
+  const newFindingInputRef = useRef<HTMLInputElement>(null);
   const [allAssets, setAllAssets] = useState<RecordEnvelope[]>([]);
   const [form, setForm] = useState<FindingPayload>(emptyFinding);
   const [scopeText, setScopeText] = useState('');
@@ -189,6 +227,8 @@ function FindingWorkspace() {
   const [evidenceDragging, setEvidenceDragging] = useState(false);
   const [metrics, setMetrics] = useState(defaultMetrics());
   const [vector, setVector] = useState('');
+  const [cvssPreview, setCvssPreview] = useState<CvssState | null>(null);
+  const [cvssPreviewError, setCvssPreviewError] = useState('');
   const [cvssNotes, setCvssNotes] = useState('');
   const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([]);
   const [assetFilter, setAssetFilter] = useState('');
@@ -218,6 +258,8 @@ function FindingWorkspace() {
     const existingMetrics = response.payload.cvss?.metrics || defaultMetrics();
     setMetrics({ ...defaultMetrics(), ...existingMetrics });
     setVector(response.payload.cvss?.vector || '');
+    setCvssPreview(response.payload.cvss || null);
+    setCvssPreviewError('');
     setCvssNotes(response.payload.cvss?.notes || '');
     setSelectedAssetIds((response.assets || []).map((asset) => asset.id));
     setAssetBulkMessage('');
@@ -231,12 +273,40 @@ function FindingWorkspace() {
     loadDetail().catch((err) => setError(err.message));
   }, [loadDetail]);
 
-  const currentVector = vector || vectorFromMetrics(metrics);
+  useEffect(() => {
+    if (newFindingOpen) newFindingInputRef.current?.focus();
+  }, [newFindingOpen]);
 
-  async function newFinding() {
-    const title = window.prompt('Finding title');
+  const currentVector = vector || vectorFromMetrics(metrics);
+  const displayCvss = cvssPreview || (!cvssPreviewError ? detail?.payload.cvss : null);
+  const displaySeverity = displayCvss ? reportSeverityFromCVSS(displayCvss) : '';
+
+  useEffect(() => {
+    if (!detail) return;
+    let cancelled = false;
+    setCvssPreviewError('');
+    api.previewCvss({ vector: vector || undefined, metrics })
+      .then((result) => {
+        if (!cancelled) setCvssPreview(result);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setCvssPreview(null);
+          setCvssPreviewError(err instanceof Error ? err.message : String(err));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [detail, vector, metrics]);
+
+  async function createFinding(event: FormEvent) {
+    event.preventDefault();
+    const title = newFindingTitle.trim();
     if (!title) return;
     const created = await api.createFinding({ ...emptyFinding, title });
+    setNewFindingTitle('');
+    setNewFindingOpen(false);
     await loadFindings();
     setSelectedId(created.id);
   }
@@ -342,10 +412,32 @@ function FindingWorkspace() {
             <h1>Findings</h1>
             <p>{findings.length} records</p>
           </div>
-          <button className="icon-button" onClick={newFinding} title="New finding">
+          <button className="icon-button" onClick={() => setNewFindingOpen((open) => !open)} title="New finding">
             <Plus size={18} />
           </button>
         </div>
+        {newFindingOpen && (
+          <form className="new-finding-form" onSubmit={createFinding}>
+            <input
+              ref={newFindingInputRef}
+              value={newFindingTitle}
+              onChange={(event) => setNewFindingTitle(event.target.value)}
+              placeholder="Finding title"
+            />
+            <div>
+              <button className="primary" type="submit" disabled={!newFindingTitle.trim()}>Create</button>
+              <button
+                type="button"
+                onClick={() => {
+                  setNewFindingTitle('');
+                  setNewFindingOpen(false);
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        )}
         <div className="finding-list">
           {findings.map((finding) => (
             <button key={finding.id} className={selectedId === finding.id ? 'selected' : ''} onClick={() => setSelectedId(finding.id)}>
@@ -420,8 +512,15 @@ function FindingWorkspace() {
                 ))}
               </div>
               <input value={cvssNotes} onChange={(event) => setCvssNotes(event.target.value)} placeholder="Scoring notes" />
-              <button className="primary full" onClick={scoreCvss}>Score finding</button>
-              {detail.payload.cvss && <p className="score-line">{detail.payload.cvss.score} · {detail.payload.cvss.severity}</p>}
+              {displayCvss && (
+                <div className={`score-card severity-${severityClass(displaySeverity)}`}>
+                  <span>Live score</span>
+                  <strong>{displayCvss.score?.toFixed(1) ?? '0.0'}</strong>
+                  <b>{displaySeverity}</b>
+                </div>
+              )}
+              {cvssPreviewError && <p className="score-error">{cvssPreviewError}</p>}
+              <button className="primary full" onClick={scoreCvss}>Save CVSS score</button>
             </Panel>
 
             <Panel title="Affected Assets">
@@ -451,10 +550,22 @@ function FindingWorkspace() {
                     </label>
                   ))}
                 </div>
-                <label className="check-row">
-                  <input type="checkbox" checked={syncAssetScope} onChange={(event) => setSyncAssetScope(event.target.checked)} />
-                  <span>Sync affected scope from selected assets</span>
-                </label>
+                <div className="check-row">
+                  <label className="check-label">
+                    <input type="checkbox" checked={syncAssetScope} onChange={(event) => setSyncAssetScope(event.target.checked)} />
+                    <span>Sync affected scope from selected assets</span>
+                  </label>
+                  <span
+                    className="help-tooltip"
+                    tabIndex={0}
+                    aria-label="When enabled, saving affected assets replaces the finding's Affected Scope field with the selected asset names and values. Turn it off to link assets without changing that text."
+                  >
+                    <CircleHelp size={14} />
+                    <span role="tooltip">
+                      Updates Affected Scope from selected assets when saved. Turn it off to link assets without changing that field.
+                    </span>
+                  </span>
+                </div>
                 <button className="primary full" onClick={saveAffectedAssets}>Save affected assets</button>
                 {assetBulkMessage && <p className="muted">{assetBulkMessage}</p>}
               </div>
@@ -499,7 +610,7 @@ function FindingWorkspace() {
             <Panel title="Finding Packet">
               <div className="packet-actions">
                 <button onClick={copyPacket}><Clipboard size={15} /> Copy</button>
-                <a className="button-link" href={`/api/findings/${detail.id}/packet?download=1`}>
+                <a className="button-link" href={`/api/findings/${detail.id}/packet?download=1`} download={markdownDownloadName(detail.payload.title, 'finding-packet')}>
                   <Download size={15} /> Download
                 </a>
               </div>
@@ -1305,6 +1416,10 @@ function PacketsModule() {
       ? `/api/findings/${selected}/citation-bundle?download=1${assetId ? `&asset_id=${encodeURIComponent(assetId)}` : ''}`
       : `/api/findings/${selected}/packet?download=1`
     : '';
+  const selectedFinding = findings.find((finding) => finding.id === selected);
+  const downloadName = selectedFinding
+    ? markdownDownloadName(selectedFinding.payload.title, packetMode === 'citation' ? 'evidence-citation-bundle' : 'finding-packet')
+    : undefined;
   return (
     <section className="module-page two-column">
       <div>
@@ -1327,7 +1442,7 @@ function PacketsModule() {
         </select>
         <div className="packet-actions">
           <button onClick={() => navigator.clipboard.writeText(markdown)}><Clipboard size={15} /> Copy Markdown</button>
-          {selected && <a className="button-link" href={downloadHref}><Download size={15} /> Download</a>}
+          {selected && <a className="button-link" href={downloadHref} download={downloadName}><Download size={15} /> Download</a>}
         </div>
       </div>
       <pre className="packet-preview large">{markdown}</pre>
@@ -1795,6 +1910,28 @@ function formatBytes(bytes: number) {
     index += 1;
   }
   return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[index]}`;
+}
+
+function markdownDownloadName(title: string, suffix: string) {
+  const slug = title
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return `${slug || 'finding'}-${suffix}.md`;
+}
+
+function severityClass(severity = '') {
+  const normalized = severity.toLowerCase();
+  if (normalized === 'informational') return 'info';
+  if (['info', 'none', 'low', 'medium', 'high', 'critical'].includes(normalized)) return normalized;
+  return 'none';
+}
+
+function reportSeverityFromCVSS(cvss: CvssState) {
+  if (typeof cvss.score === 'number' && cvss.score === 0) return 'INFO';
+  if (cvss.severity?.toUpperCase() === 'NONE') return 'INFO';
+  return cvss.severity || 'NONE';
 }
 
 function recordTitle(record: RecordEnvelope) {

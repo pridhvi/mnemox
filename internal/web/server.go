@@ -89,6 +89,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/findings/{id}/notes", s.requireUnlock(s.handleAddFindingNote))
 	mux.HandleFunc("POST /api/findings/{id}/evidence", s.requireUnlock(s.handleUploadFindingEvidence))
 	mux.HandleFunc("POST /api/findings/{id}/cvss", s.requireUnlock(s.handleScoreFinding))
+	mux.HandleFunc("POST /api/cvss/preview", s.requireUnlock(s.handlePreviewCVSS))
 	mux.HandleFunc("GET /api/findings/{id}/packet", s.requireUnlock(s.handleFindingPacket))
 	mux.HandleFunc("GET /api/findings/{id}/citation-bundle", s.requireUnlock(s.handleCitationBundle))
 	mux.HandleFunc("GET /api/assets", s.requireUnlock(s.handleListAssets))
@@ -493,22 +494,12 @@ func (s *Server) handleUploadFindingEvidence(w http.ResponseWriter, r *http.Requ
 }
 
 func (s *Server) handleScoreFinding(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Vector  string            `json:"vector"`
-		Metrics map[string]string `json:"metrics"`
-		Notes   string            `json:"notes"`
-	}
+	var body cvssScoreRequest
 	if err := readJSON(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	var result cvss.Result
-	var err error
-	if body.Vector != "" {
-		result, err = cvss.FromVector(body.Vector)
-	} else {
-		result, err = cvss.FromMetrics(body.Metrics)
-	}
+	result, err := scoreCVSSRequest(body)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -527,7 +518,7 @@ func (s *Server) handleScoreFinding(w http.ResponseWriter, r *http.Request) {
 		"notes":    body.Notes,
 	}
 	if severity := asString(rec.Payload["severity"]); severity == "" || severity == "Unscored" {
-		rec.Payload["severity"] = result.Severity
+		rec.Payload["severity"] = findingSeverityFromCVSS(result)
 	}
 	if err := v.UpdateRecord(rec.ID, rec.Payload); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -536,15 +527,60 @@ func (s *Server) handleScoreFinding(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, rec.Payload["cvss"])
 }
 
+func (s *Server) handlePreviewCVSS(w http.ResponseWriter, r *http.Request) {
+	var body cvssScoreRequest
+	if err := readJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	result, err := scoreCVSSRequest(body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"vector":   result.Vector,
+		"score":    result.Score,
+		"severity": result.Severity,
+		"metrics":  result.Metrics,
+	})
+}
+
+type cvssScoreRequest struct {
+	Vector  string            `json:"vector"`
+	Metrics map[string]string `json:"metrics"`
+	Notes   string            `json:"notes"`
+}
+
+func scoreCVSSRequest(body cvssScoreRequest) (cvss.Result, error) {
+	if strings.TrimSpace(body.Vector) != "" {
+		return cvss.FromVector(strings.TrimSpace(body.Vector))
+	}
+	return cvss.FromMetrics(body.Metrics)
+}
+
+func findingSeverityFromCVSS(result cvss.Result) string {
+	if result.Score == 0 {
+		return "INFO"
+	}
+	return result.Severity
+}
+
 func (s *Server) handleFindingPacket(w http.ResponseWriter, r *http.Request) {
-	markdown, err := packet.Render(s.currentVault(), r.PathValue("id"))
+	v := s.currentVault()
+	rec, err := v.GetRecord(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	markdown, err := packet.Render(v, rec.ID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
 	if r.URL.Query().Get("download") == "1" {
 		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
-		w.Header().Set("Content-Disposition", `attachment; filename="finding-packet.md"`)
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename=%q`, markdownFilename(asString(rec.Payload["title"]), "finding-packet")))
 		_, _ = w.Write([]byte(markdown))
 		return
 	}
@@ -552,7 +588,13 @@ func (s *Server) handleFindingPacket(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCitationBundle(w http.ResponseWriter, r *http.Request) {
-	markdown, err := packet.RenderCitationBundle(s.currentVault(), r.PathValue("id"), packet.CitationBundleOptions{
+	v := s.currentVault()
+	rec, err := v.GetRecord(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	markdown, err := packet.RenderCitationBundle(v, rec.ID, packet.CitationBundleOptions{
 		AssetID: r.URL.Query().Get("asset_id"),
 	})
 	if err != nil {
@@ -561,11 +603,41 @@ func (s *Server) handleCitationBundle(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Query().Get("download") == "1" {
 		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
-		w.Header().Set("Content-Disposition", `attachment; filename="evidence-citation-bundle.md"`)
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename=%q`, markdownFilename(asString(rec.Payload["title"]), "evidence-citation-bundle")))
 		_, _ = w.Write([]byte(markdown))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"markdown": markdown})
+}
+
+func markdownFilename(title, suffix string) string {
+	slug := filenameSlug(title)
+	if slug == "" {
+		slug = "finding"
+	}
+	return slug + "-" + suffix + ".md"
+}
+
+func filenameSlug(value string) string {
+	var b strings.Builder
+	lastDash := false
+	for _, r := range strings.ToLower(strings.TrimSpace(value)) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if r == '_' {
+			b.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash {
+			b.WriteRune('-')
+			lastDash = true
+		}
+	}
+	return strings.Trim(b.String(), "-_")
 }
 
 func (s *Server) handleListAssets(w http.ResponseWriter, r *http.Request) {

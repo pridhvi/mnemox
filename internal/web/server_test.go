@@ -114,8 +114,34 @@ func TestWebAPIWorkflowAndCredentialRedaction(t *testing.T) {
 		t.Fatalf("unexpected preview response: %d %s", previewResp.StatusCode, previewResp.Header.Get("Content-Type"))
 	}
 
+	cvssMetrics := map[string]string{"AV": "N", "AC": "L", "AT": "N", "PR": "N", "UI": "N", "VC": "L", "VI": "N", "VA": "N", "SC": "N", "SI": "N", "SA": "N"}
+	cvssPreview := postJSON(t, ts.URL+"/api/cvss/preview", map[string]any{
+		"metrics": cvssMetrics,
+	}, http.StatusOK)
+	if !strings.HasPrefix(cvssPreview["vector"].(string), "CVSS:4.0/") || cvssPreview["severity"] == "" {
+		t.Fatalf("expected CVSS preview: %#v", cvssPreview)
+	}
+	unscoredDetail := getJSON(t, ts.URL+"/api/findings/"+findingID, http.StatusOK)
+	if unscoredDetail["payload"].(map[string]any)["cvss"] != nil {
+		t.Fatalf("preview should not persist CVSS state: %#v", unscoredDetail["payload"])
+	}
+	infoFinding := postJSON(t, ts.URL+"/api/findings", map[string]any{
+		"title": "Informational banner exposure",
+	}, http.StatusCreated)
+	infoID := infoFinding["id"].(string)
+	zeroCvss := postJSON(t, ts.URL+"/api/findings/"+infoID+"/cvss", map[string]any{
+		"metrics": map[string]string{"AV": "N", "AC": "L", "AT": "N", "PR": "N", "UI": "N", "VC": "N", "VI": "N", "VA": "N", "SC": "N", "SI": "N", "SA": "N"},
+	}, http.StatusOK)
+	if zeroCvss["severity"] != "NONE" {
+		t.Fatalf("expected raw CVSS severity NONE: %#v", zeroCvss)
+	}
+	infoDetail := getJSON(t, ts.URL+"/api/findings/"+infoID, http.StatusOK)
+	if infoDetail["payload"].(map[string]any)["severity"] != "INFO" {
+		t.Fatalf("expected finding severity INFO for zero CVSS score: %#v", infoDetail["payload"])
+	}
+
 	cvss := postJSON(t, ts.URL+"/api/findings/"+findingID+"/cvss", map[string]any{
-		"metrics": map[string]string{"AV": "N", "AC": "L", "AT": "N", "PR": "N", "UI": "N", "VC": "L", "VI": "N", "VA": "N", "SC": "N", "SI": "N", "SA": "N"},
+		"metrics": cvssMetrics,
 		"notes":   "Information disclosure only.",
 	}, http.StatusOK)
 	if !strings.HasPrefix(cvss["vector"].(string), "CVSS:4.0/") {
@@ -125,6 +151,15 @@ func TestWebAPIWorkflowAndCredentialRedaction(t *testing.T) {
 	packet := getJSON(t, ts.URL+"/api/findings/"+findingID+"/packet", http.StatusOK)
 	if !strings.Contains(packet["markdown"].(string), "Jenkins anonymous read") {
 		t.Fatalf("packet missing finding title: %#v", packet)
+	}
+	packetDownloadResp, err := http.Get(ts.URL + "/api/findings/" + findingID + "/packet?download=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.Copy(io.Discard, packetDownloadResp.Body)
+	_ = packetDownloadResp.Body.Close()
+	if packetDownloadResp.StatusCode != http.StatusOK || !strings.Contains(packetDownloadResp.Header.Get("Content-Disposition"), "jenkins-anonymous-read-finding-packet.md") {
+		t.Fatalf("unexpected packet download header: %d %s", packetDownloadResp.StatusCode, packetDownloadResp.Header.Get("Content-Disposition"))
 	}
 	bundle := getJSON(t, ts.URL+"/api/findings/"+findingID+"/citation-bundle?asset_id="+assetID, http.StatusOK)
 	bundleMarkdown := bundle["markdown"].(string)
