@@ -22,7 +22,7 @@ type Result struct {
 }
 
 func NmapXML(v *vault.Vault, path string) (Result, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- importers intentionally read a user-selected local file.
 	if err != nil {
 		return Result{}, err
 	}
@@ -68,7 +68,7 @@ func NmapXML(v *vault.Vault, path string) (Result, error) {
 }
 
 func NucleiJSON(v *vault.Vault, path string) (Result, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- importers intentionally read a user-selected local file.
 	if err != nil {
 		return Result{}, err
 	}
@@ -122,7 +122,7 @@ func NucleiJSON(v *vault.Vault, path string) (Result, error) {
 }
 
 func BurpXML(v *vault.Vault, path string) (Result, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- importers intentionally read a user-selected local file.
 	if err != nil {
 		return Result{}, err
 	}
@@ -172,7 +172,7 @@ func BurpXML(v *vault.Vault, path string) (Result, error) {
 }
 
 func NessusXML(v *vault.Vault, path string) (Result, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- importers intentionally read a user-selected local file.
 	if err != nil {
 		return Result{}, err
 	}
@@ -227,7 +227,7 @@ func NessusXML(v *vault.Vault, path string) (Result, error) {
 }
 
 func BloodHoundJSON(v *vault.Vault, path string) (Result, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- importers intentionally read a user-selected local file.
 	if err != nil {
 		return Result{}, err
 	}

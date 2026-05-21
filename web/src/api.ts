@@ -3,23 +3,33 @@ import type { AssetDetail, AssetDuplicateGroup, AttackPath, CvssState, FindingPa
 export type ImportResult = { assets: number; findings: number; evidence: number; notes?: number };
 export type CvssScorePayload = { vector?: string; metrics?: Record<string, string>; notes?: string };
 
+let apiToken = '';
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const headers = new Headers(options.headers);
+  if (!(options.body instanceof FormData) && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+  if (apiToken && path !== '/api/status') {
+    headers.set('X-Mnemox-Api-Token', apiToken);
+  }
   const response = await fetch(path, {
     ...options,
-    headers: {
-      ...(options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
-      ...options.headers,
-    },
+    headers,
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(body.error || response.statusText);
   }
-  return response.json() as Promise<T>;
+  const payload = await response.json();
+  if (path === '/api/status' && typeof payload.api_token === 'string') {
+    apiToken = payload.api_token;
+  }
+  return payload as T;
 }
 
 export const api = {
-  status: () => request<{ unlocked: boolean; vault_path: string }>('/api/status'),
+  status: () => request<{ unlocked: boolean; vault_path: string; api_token: string }>('/api/status'),
   init: (name: string, passphrase: string) =>
     request<{ unlocked: boolean }>('/api/init', { method: 'POST', body: JSON.stringify({ name, passphrase }) }),
   unlock: (passphrase: string) =>

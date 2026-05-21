@@ -1,7 +1,9 @@
 package web
 
 import (
+	"crypto/rand"
 	"embed"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +12,7 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -28,9 +31,18 @@ import (
 //go:embed static
 var staticFS embed.FS
 
+const (
+	apiTokenHeader       = "X-Mnemox-Api-Token" // #nosec G101 -- this is a public header name, not credential material.
+	maxJSONBodyBytes     = 4 << 20
+	maxMultipartMemory   = 8 << 20
+	maxUploadBodyBytes   = 65 << 20
+	maxUploadedFileBytes = 64 << 20
+)
+
 type Server struct {
 	vaultPath string
 	addr      string
+	apiToken  string
 	mu        sync.Mutex
 	vault     *vault.Vault
 	unlocked  bool
@@ -48,7 +60,7 @@ func New(options Options) *Server {
 	if options.Addr == "" {
 		options.Addr = "127.0.0.1:8787"
 	}
-	return &Server{vaultPath: options.VaultPath, addr: options.Addr}
+	return &Server{vaultPath: options.VaultPath, addr: options.Addr, apiToken: newAPIToken()}
 }
 
 func (s *Server) ListenAndServe() error {
@@ -125,7 +137,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/search", s.requireUnlock(s.handleSearch))
 	mux.HandleFunc("GET /api/settings", s.requireUnlock(s.handleSettings))
 	mux.Handle("/", spaHandler())
-	return secureHeaders(mux)
+	return secureHeaders(s.trustBoundary(mux))
 }
 
 func (s *Server) URL(listener net.Listener) string {
@@ -142,6 +154,41 @@ func (s *Server) requireUnlock(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+func (s *Server) trustBoundary(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !s.validHost(r.Host) {
+			writeError(w, http.StatusForbidden, "invalid host")
+			return
+		}
+		if !validOrigin(r) {
+			writeError(w, http.StatusForbidden, "invalid origin")
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/api/status" {
+			if r.Header.Get(apiTokenHeader) != s.apiToken {
+				writeError(w, http.StatusForbidden, "invalid API token")
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) validHost(host string) bool {
+	name := hostOnly(host)
+	if name == "" {
+		return false
+	}
+	if isLoopbackHost(name) {
+		return true
+	}
+	bindHost := hostOnly(s.addr)
+	if bindHost == "" || isWildcardHost(bindHost) {
+		return true
+	}
+	return strings.EqualFold(name, bindHost)
+}
+
 func (s *Server) currentVault() *vault.Vault {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -152,6 +199,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"unlocked":   s.currentVault() != nil,
 		"vault_path": s.vaultPath,
+		"api_token":  s.apiToken,
 	})
 }
 
@@ -164,10 +212,7 @@ func (s *Server) handleUnlock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	passphrase := body.Passphrase
-	if passphrase == "" {
-		passphrase = os.Getenv("MNEMOX_PASSPHRASE")
-	}
-	if passphrase == "" {
+	if strings.TrimSpace(passphrase) == "" {
 		writeError(w, http.StatusBadRequest, "passphrase is required")
 		return
 	}
@@ -441,7 +486,7 @@ func (s *Server) handleAddFindingNote(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUploadFindingEvidence(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseMultipartForm(64 << 20); err != nil {
+	if err := parseMultipart(w, r); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -451,9 +496,13 @@ func (s *Server) handleUploadFindingEvidence(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	defer file.Close()
-	data, err := io.ReadAll(file)
+	data, err := io.ReadAll(io.LimitReader(file, maxUploadedFileBytes+1))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if int64(len(data)) > maxUploadedFileBytes {
+		writeError(w, http.StatusRequestEntityTooLarge, "file exceeds 64 MiB limit")
 		return
 	}
 	v := s.currentVault()
@@ -763,7 +812,7 @@ func (s *Server) handleOCRStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleImportFile(w http.ResponseWriter, r *http.Request, fn func(*vault.Vault, string) (importer.Result, error)) {
-	if err := r.ParseMultipartForm(64 << 20); err != nil {
+	if err := parseMultipart(w, r); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -779,8 +828,14 @@ func (s *Server) handleImportFile(w http.ResponseWriter, r *http.Request, fn fun
 		return
 	}
 	defer os.Remove(temp.Name())
-	if _, err := io.Copy(temp, file); err != nil {
+	written, err := io.Copy(temp, io.LimitReader(file, maxUploadedFileBytes+1))
+	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
+		_ = temp.Close()
+		return
+	}
+	if written > maxUploadedFileBytes {
+		writeError(w, http.StatusRequestEntityTooLarge, "file exceeds 64 MiB limit")
 		_ = temp.Close()
 		return
 	}
@@ -1699,17 +1754,112 @@ func spaHandler() http.Handler {
 	})
 }
 
+func newAPIToken() string {
+	token := make([]byte, 32)
+	if _, err := rand.Read(token); err != nil {
+		panic(fmt.Errorf("generate API token: %w", err))
+	}
+	return base64.RawURLEncoding.EncodeToString(token)
+}
+
+func validOrigin(r *http.Request) bool {
+	if origin := r.Header.Get("Origin"); origin != "" {
+		return sameRequestOrigin(origin, r.Host)
+	}
+	if referer := r.Header.Get("Referer"); referer != "" {
+		return sameRequestOrigin(referer, r.Host)
+	}
+	return true
+}
+
+func sameRequestOrigin(rawURL, host string) bool {
+	parsed, err := url.Parse(rawURL)
+	if err != nil || parsed.Host == "" {
+		return false
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return false
+	}
+	return strings.EqualFold(normalizeAuthority(parsed.Host), normalizeAuthority(host))
+}
+
+func normalizeAuthority(authority string) string {
+	return strings.TrimSuffix(strings.ToLower(strings.TrimSpace(authority)), ".")
+}
+
+func hostOnly(authority string) string {
+	authority = normalizeAuthority(authority)
+	if authority == "" {
+		return ""
+	}
+	if host, _, err := net.SplitHostPort(authority); err == nil {
+		return strings.Trim(host, "[]")
+	}
+	if ip := net.ParseIP(strings.Trim(authority, "[]")); ip != nil {
+		return ip.String()
+	}
+	return strings.Trim(authority, "[]")
+}
+
+func isLoopbackHost(host string) bool {
+	host = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(host)), ".")
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+func isWildcardHost(host string) bool {
+	host = strings.TrimSpace(host)
+	if host == "" || host == "0.0.0.0" || host == "::" || host == "[::]" {
+		return true
+	}
+	ip := net.ParseIP(strings.Trim(host, "[]"))
+	return ip != nil && ip.IsUnspecified()
+}
+
+func parseMultipart(w http.ResponseWriter, r *http.Request) error {
+	if err := requireContentType(r, "multipart/form-data"); err != nil {
+		return err
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBodyBytes)
+	return r.ParseMultipartForm(maxMultipartMemory)
+}
+
+func requireContentType(r *http.Request, expected string) error {
+	contentType := strings.TrimSpace(r.Header.Get("Content-Type"))
+	if contentType == "" {
+		return fmt.Errorf("content type must be %s", expected)
+	}
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return fmt.Errorf("invalid content type")
+	}
+	if mediaType != expected {
+		return fmt.Errorf("content type must be %s", expected)
+	}
+	return nil
+}
+
 func secureHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			w.Header().Set("Cache-Control", "no-store")
+		}
 		next.ServeHTTP(w, r)
 	})
 }
 
 func readJSON(r *http.Request, target any) error {
 	defer r.Body.Close()
-	decoder := json.NewDecoder(io.LimitReader(r.Body, 4<<20))
+	if err := requireContentType(r, "application/json"); err != nil {
+		return err
+	}
+	decoder := json.NewDecoder(io.LimitReader(r.Body, maxJSONBodyBytes))
 	decoder.DisallowUnknownFields()
 	return decoder.Decode(target)
 }

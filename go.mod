@@ -1,6 +1,6 @@
 module mnemox
 
-go 1.24.0
+go 1.26.3
 
 require (
 	github.com/chzyer/readline v1.5.1

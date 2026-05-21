@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -117,7 +118,7 @@ func OpenWithPassphrase(root, passphrase string) (*Vault, error) {
 	if root == "" {
 		root = DefaultPath()
 	}
-	data, err := os.ReadFile(filepath.Join(root, "config.json"))
+	data, err := os.ReadFile(filepath.Join(root, "config.json")) // #nosec G304 -- root is the user-selected vault directory.
 	if err != nil {
 		return nil, fmt.Errorf("vault not initialized: %s", root)
 	}
@@ -424,7 +425,7 @@ func (v *Vault) LinkCounts(relation string) (map[string]int, error) {
 }
 
 func (v *Vault) StoreBlob(path string) (string, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- importing a user-selected local file is intended behavior.
 	if err != nil {
 		return "", err
 	}
@@ -440,7 +441,26 @@ func (v *Vault) StoreBlobBytes(data []byte) (string, error) {
 	if err := os.MkdirAll(v.BlobDir, 0o700); err != nil {
 		return "", err
 	}
-	return id, os.WriteFile(filepath.Join(v.BlobDir, id+".bin"), token, 0o600)
+	root, err := os.OpenRoot(v.BlobDir)
+	if err != nil {
+		return "", err
+	}
+	defer root.Close()
+	file, err := root.OpenFile(id+".bin", os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return "", err
+	}
+	n, err := file.Write(token)
+	if closeErr := file.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return "", err
+	}
+	if n != len(token) {
+		return "", io.ErrShortWrite
+	}
+	return id, nil
 }
 
 func (v *Vault) ExportBlob(id, output string) error {
@@ -448,18 +468,41 @@ func (v *Vault) ExportBlob(id, output string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(output), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(output), 0o700); err != nil {
 		return err
 	}
 	return os.WriteFile(output, plain, 0o600)
 }
 
 func (v *Vault) ReadBlob(id string) ([]byte, error) {
-	token, err := os.ReadFile(filepath.Join(v.BlobDir, id+".bin"))
+	name, err := blobFileName(id)
+	if err != nil {
+		return nil, err
+	}
+	root, err := os.OpenRoot(v.BlobDir)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	file, err := root.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	token, err := io.ReadAll(file)
 	if err != nil {
 		return nil, err
 	}
 	return v.box.decrypt(token)
+}
+
+func blobFileName(id string) (string, error) {
+	normalized := strings.ToLower(strings.TrimSpace(id))
+	parsed, err := uuid.Parse(normalized)
+	if err != nil || parsed.String() != normalized {
+		return "", fmt.Errorf("invalid blob id")
+	}
+	return parsed.String() + ".bin", nil
 }
 
 func (v *Vault) Search(query string, limit int) ([]SearchHit, error) {

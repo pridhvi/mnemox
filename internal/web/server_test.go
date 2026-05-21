@@ -105,6 +105,7 @@ func TestWebAPIWorkflowAndCredentialRedaction(t *testing.T) {
 		t.Fatalf("expected asset-filtered finding: %#v", filteredFindings)
 	}
 	previewReq, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/evidence/"+evidenceRecord["id"].(string)+"/preview", nil)
+	addAPIToken(t, previewReq)
 	previewResp, err := http.DefaultClient.Do(previewReq)
 	if err != nil {
 		t.Fatal(err)
@@ -152,7 +153,9 @@ func TestWebAPIWorkflowAndCredentialRedaction(t *testing.T) {
 	if !strings.Contains(packet["markdown"].(string), "Jenkins anonymous read") {
 		t.Fatalf("packet missing finding title: %#v", packet)
 	}
-	packetDownloadResp, err := http.Get(ts.URL + "/api/findings/" + findingID + "/packet?download=1")
+	packetDownloadReq, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/findings/"+findingID+"/packet?download=1", nil)
+	addAPIToken(t, packetDownloadReq)
+	packetDownloadResp, err := http.DefaultClient.Do(packetDownloadReq)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,6 +262,52 @@ func TestWebAPIWorkflowAndCredentialRedaction(t *testing.T) {
 	if strings.Contains(packetMarkdown, "super-secret-value") {
 		t.Fatalf("attack path packet leaked credential secret: %s", packetMarkdown)
 	}
+}
+
+func TestWebAPIBoundaryRequiresTokenOriginAndJSON(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".mnemox")
+	v, err := vault.CreateWithPassphrase(root, "ACME", "test-passphrase")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = v.Close()
+
+	server := New(Options{VaultPath: root, Addr: "127.0.0.1:0"})
+	ts := httptest.NewServer(server.routes())
+	defer ts.Close()
+
+	status := getJSON(t, ts.URL+"/api/status", http.StatusOK)
+	token := status["api_token"].(string)
+	if token == "" {
+		t.Fatalf("expected status API token: %#v", status)
+	}
+
+	req := rawJSONRequest(t, http.MethodPost, ts.URL+"/api/unlock", map[string]any{"passphrase": "test-passphrase"})
+	expectStatus(t, req, http.StatusForbidden)
+
+	req = rawJSONRequest(t, http.MethodPost, ts.URL+"/api/unlock", map[string]any{"passphrase": "test-passphrase"})
+	req.Header.Set(apiTokenHeader, token)
+	req.Header.Set("Origin", "https://attacker.example")
+	expectStatus(t, req, http.StatusForbidden)
+
+	req = rawJSONRequest(t, http.MethodPost, ts.URL+"/api/unlock", map[string]any{"passphrase": "test-passphrase"})
+	req.Header.Set(apiTokenHeader, token)
+	req.Host = "attacker.example"
+	expectStatus(t, req, http.StatusForbidden)
+
+	t.Setenv("MNEMOX_PASSPHRASE", "test-passphrase")
+	req = rawJSONRequest(t, http.MethodPost, ts.URL+"/api/unlock", map[string]any{"passphrase": ""})
+	req.Header.Set(apiTokenHeader, token)
+	expectStatus(t, req, http.StatusBadRequest)
+
+	req = rawJSONRequest(t, http.MethodPost, ts.URL+"/api/unlock", map[string]any{"passphrase": "test-passphrase"})
+	req.Header.Set(apiTokenHeader, token)
+	req.Header.Set("Content-Type", "text/plain")
+	expectStatus(t, req, http.StatusBadRequest)
+
+	req = rawJSONRequest(t, http.MethodPost, ts.URL+"/api/unlock", map[string]any{"passphrase": "test-passphrase"})
+	req.Header.Set(apiTokenHeader, token)
+	expectStatus(t, req, http.StatusOK)
 }
 
 func TestAssetMergeMovesRelationsAndRedactsCredentialContext(t *testing.T) {
@@ -541,8 +590,33 @@ func deleteJSON(t *testing.T, url string, status int) map[string]any {
 	return doJSON(t, req, status)
 }
 
+func rawJSONRequest(t *testing.T, method, url string, payload any) *http.Request {
+	t.Helper()
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequest(method, url, bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	return req
+}
+
+func expectStatus(t *testing.T, req *http.Request, status int) {
+	t.Helper()
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != status {
+		t.Fatalf("%s %s: status %d, want %d, body %s", req.Method, req.URL, resp.StatusCode, status, data)
+	}
+}
+
 func doJSON(t *testing.T, req *http.Request, status int) map[string]any {
 	t.Helper()
+	addAPIToken(t, req)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -557,6 +631,28 @@ func doJSON(t *testing.T, req *http.Request, status int) map[string]any {
 		t.Fatalf("invalid JSON: %v\n%s", err, data)
 	}
 	return out
+}
+
+func addAPIToken(t *testing.T, req *http.Request) {
+	t.Helper()
+	if !strings.HasPrefix(req.URL.Path, "/api/") || req.URL.Path == "/api/status" || req.Header.Get(apiTokenHeader) != "" {
+		return
+	}
+	statusURL := req.URL.Scheme + "://" + req.URL.Host + "/api/status"
+	resp, err := http.Get(statusURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var status map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+		t.Fatal(err)
+	}
+	token, ok := status["api_token"].(string)
+	if !ok || token == "" {
+		t.Fatalf("missing API token in status response: %#v", status)
+	}
+	req.Header.Set(apiTokenHeader, token)
 }
 
 func uploadEvidence(t *testing.T, url string) map[string]any {

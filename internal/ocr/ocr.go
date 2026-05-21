@@ -35,7 +35,7 @@ type Result struct {
 }
 
 func TesseractStatus(ctx context.Context) Status {
-	path, err := exec.LookPath(Engine)
+	path, err := tesseractPath()
 	if err != nil {
 		return Status{Available: false, Engine: Engine, Error: "install tesseract to enable local OCR"}
 	}
@@ -43,14 +43,15 @@ func TesseractStatus(ctx context.Context) Status {
 }
 
 func Extract(ctx context.Context, image []byte) (Result, error) {
-	status := TesseractStatus(ctx)
-	if !status.Available {
+	path, err := tesseractPath()
+	if err != nil {
 		return Result{
 			Status: "unavailable",
 			Engine: Engine,
-			Error:  status.Error,
+			Error:  "install tesseract to enable local OCR",
 		}, ErrUnavailable
 	}
+	status := Status{Available: true, Engine: Engine, Version: tesseractVersion(ctx, path)}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	temp, err := os.CreateTemp("", "mnemox-ocr-*")
@@ -67,7 +68,7 @@ func Extract(ctx context.Context, image []byte) (Result, error) {
 		return Result{}, err
 	}
 	var stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, Engine, tempName, "stdout")
+	cmd := exec.CommandContext(ctx, path, tempName, "stdout") // #nosec G204 -- path is resolved from the fixed tesseract binary name before execution.
 	cmd.Stderr = &stderr
 	output, err := cmd.Output()
 	if err != nil {
@@ -95,10 +96,14 @@ func Extract(ctx context.Context, image []byte) (Result, error) {
 	}, nil
 }
 
+func tesseractPath() (string, error) {
+	return exec.LookPath(Engine)
+}
+
 func tesseractVersion(ctx context.Context, path string) string {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	output, err := exec.CommandContext(ctx, path, "--version").Output()
+	output, err := exec.CommandContext(ctx, path, "--version").Output() // #nosec G204 -- path is resolved from the fixed tesseract binary name before execution.
 	if err != nil {
 		return ""
 	}
