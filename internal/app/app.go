@@ -6,22 +6,27 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
+	"time"
 
-	"mnemox/internal/console"
-	"mnemox/internal/cvss"
-	"mnemox/internal/domain"
-	evidencepkg "mnemox/internal/evidence"
-	"mnemox/internal/importer"
-	"mnemox/internal/packet"
-	"mnemox/internal/vault"
-	"mnemox/internal/web"
+	"github.com/pridhvi/mnemox/internal/console"
+	"github.com/pridhvi/mnemox/internal/cvss"
+	"github.com/pridhvi/mnemox/internal/domain"
+	evidencepkg "github.com/pridhvi/mnemox/internal/evidence"
+	"github.com/pridhvi/mnemox/internal/importer"
+	"github.com/pridhvi/mnemox/internal/packet"
+	"github.com/pridhvi/mnemox/internal/vault"
+	"github.com/pridhvi/mnemox/internal/web"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 type App struct {
-	root      *cobra.Command
-	vaultPath string
+	root            *cobra.Command
+	vaultPath       string
+	passphraseStdin bool
+	passphraseFile  string
 }
 
 func New() *App {
@@ -36,7 +41,9 @@ func New() *App {
 		},
 	}
 	root.PersistentFlags().StringVar(&a.vaultPath, "vault", "", "path to vault directory, default .mnemox or MNEMOX_VAULT")
-	root.AddCommand(a.initCmd(), a.findingCmd(), a.assetCmd(), a.noteCmd(), a.evidenceCmd(), a.credCmd(), a.importCmd(), a.askCmd(), a.cvssCmd(), a.packetCmd(), a.exportBlobCmd(), a.serveCmd())
+	root.PersistentFlags().BoolVar(&a.passphraseStdin, "passphrase-stdin", false, "read the vault passphrase from stdin")
+	root.PersistentFlags().StringVar(&a.passphraseFile, "passphrase-file", "", "read the vault passphrase from a file")
+	root.AddCommand(a.initCmd(), a.findingCmd(), a.assetCmd(), a.noteCmd(), a.evidenceCmd(), a.credCmd(), a.importCmd(), a.askCmd(), a.cvssCmd(), a.packetCmd(), a.exportBlobCmd(), a.backupCmd(), a.vaultCmd(), a.serveCmd())
 	a.root = root
 	return a
 }
@@ -77,7 +84,17 @@ func (a *App) resolvedVaultPath() string {
 }
 
 func (a *App) openVault() (*vault.Vault, error) {
+	if err := a.configurePassphraseSource(); err != nil {
+		return nil, err
+	}
 	return vault.Open(a.resolvedVaultPath())
+}
+
+func (a *App) configurePassphraseSource() error {
+	return vault.ConfigurePassphraseSource(vault.PassphraseOptions{
+		FromStdin: a.passphraseStdin,
+		File:      a.passphraseFile,
+	})
 }
 
 func (a *App) initCmd() *cobra.Command {
@@ -86,6 +103,9 @@ func (a *App) initCmd() *cobra.Command {
 		Use:   "init",
 		Short: "Create an encrypted vault.",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := a.configurePassphraseSource(); err != nil {
+				return err
+			}
 			v, err := vault.Create(a.resolvedVaultPath(), name)
 			if err != nil {
 				return err
@@ -666,10 +686,85 @@ func (a *App) exportBlobCmd() *cobra.Command {
 	return cmd
 }
 
+func (a *App) backupCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "backup", Short: "Create and restore encrypted vault backups."}
+	create := &cobra.Command{
+		Use:   "create <file.mnemoxbak>",
+		Short: "Create an encrypted full-vault backup.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			v, err := a.openVault()
+			if err != nil {
+				return err
+			}
+			defer v.Close()
+			if err := v.Backup(args[0]); err != nil {
+				return err
+			}
+			fmt.Println("Wrote encrypted backup", args[0])
+			return nil
+		},
+	}
+	var force bool
+	restore := &cobra.Command{
+		Use:   "restore <file.mnemoxbak>",
+		Short: "Restore an encrypted full-vault backup.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := a.configurePassphraseSource(); err != nil {
+				return err
+			}
+			passphrase, err := vault.ReadPassphrase(false)
+			if err != nil {
+				return err
+			}
+			if err := vault.RestoreBackup(args[0], a.resolvedVaultPath(), passphrase, force); err != nil {
+				return err
+			}
+			fmt.Println("Restored encrypted backup to", a.resolvedVaultPath())
+			return nil
+		},
+	}
+	restore.Flags().BoolVar(&force, "force", false, "overwrite an existing vault path")
+	cmd.AddCommand(create, restore)
+	return cmd
+}
+
+func (a *App) vaultCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "vault", Short: "Manage vault maintenance tasks."}
+	var backupPath string
+	migrate := &cobra.Command{
+		Use:   "migrate-v2",
+		Short: "Create an encrypted backup and build the v2 query index.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			v, err := a.openVault()
+			if err != nil {
+				return err
+			}
+			defer v.Close()
+			writtenBackup, err := v.MigrateV2(backupPath)
+			if err != nil {
+				return err
+			}
+			fmt.Println("Vault v2 query index ready")
+			if writtenBackup != "" {
+				fmt.Println("Encrypted migration backup:", writtenBackup)
+			}
+			return nil
+		},
+	}
+	migrate.Flags().StringVar(&backupPath, "backup", "", "encrypted backup path to create before migration")
+	cmd.AddCommand(migrate)
+	return cmd
+}
+
 func (a *App) serveCmd() *cobra.Command {
 	var addr string
 	var port int
 	var allowRemote bool
+	var lockAfter time.Duration
+	var basicAuthUser string
+	var basicAuthPasswordFile string
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Start the local Mnemox web UI.",
@@ -680,8 +775,12 @@ func (a *App) serveCmd() *cobra.Command {
 			if !allowRemote && addr != "127.0.0.1" && addr != "localhost" && addr != "::1" {
 				return fmt.Errorf("refusing to bind non-local address %s without --allow-remote", addr)
 			}
+			basicAuth, err := basicAuthConfig(allowRemote || cmd.Flags().Changed("basic-auth-user") || basicAuthPasswordFile != "", basicAuthUser, basicAuthPasswordFile)
+			if err != nil {
+				return err
+			}
 			bind := addr + ":" + strconv.Itoa(port)
-			server := web.New(web.Options{VaultPath: a.resolvedVaultPath(), Addr: bind})
+			server := web.New(web.Options{VaultPath: a.resolvedVaultPath(), Addr: bind, LockAfter: lockAfter, BasicAuth: basicAuth})
 			listener, err := server.Listen()
 			if err != nil {
 				return err
@@ -693,7 +792,47 @@ func (a *App) serveCmd() *cobra.Command {
 	cmd.Flags().StringVar(&addr, "addr", "127.0.0.1", "bind address")
 	cmd.Flags().IntVar(&port, "port", 8787, "bind port; use 0 for a random free port")
 	cmd.Flags().BoolVar(&allowRemote, "allow-remote", false, "allow binding to non-local addresses")
+	cmd.Flags().DurationVar(&lockAfter, "lock-after", 30*time.Minute, "idle duration before the web vault auto-locks; 0 disables")
+	cmd.Flags().StringVar(&basicAuthUser, "basic-auth-user", "mnemox", "HTTP Basic Auth username for remote or explicitly protected web access")
+	cmd.Flags().StringVar(&basicAuthPasswordFile, "basic-auth-password-file", "", "file containing the HTTP Basic Auth password")
 	return cmd
+}
+
+func basicAuthConfig(enabled bool, username, passwordFile string) (*web.BasicAuth, error) {
+	if !enabled {
+		return nil, nil
+	}
+	if strings.TrimSpace(username) == "" {
+		return nil, fmt.Errorf("--basic-auth-user is required when Basic Auth is enabled")
+	}
+	password, err := basicAuthPassword(passwordFile)
+	if err != nil {
+		return nil, err
+	}
+	if password == "" {
+		return nil, fmt.Errorf("Basic Auth password cannot be empty")
+	}
+	return &web.BasicAuth{Username: username, Password: password}, nil
+}
+
+func basicAuthPassword(passwordFile string) (string, error) {
+	if passwordFile != "" {
+		data, err := os.ReadFile(passwordFile) // #nosec G304 -- password file path is explicitly supplied by the operator.
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimRight(string(data), "\r\n"), nil
+	}
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		return "", fmt.Errorf("--basic-auth-password-file is required when Basic Auth is enabled in a non-interactive terminal")
+	}
+	fmt.Print("Mnemox Basic Auth password: ")
+	password, err := term.ReadPassword(int(os.Stdin.Fd()))
+	fmt.Println()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimRight(string(password), "\r\n"), nil
 }
 
 func stringSlice(values []string) []string {

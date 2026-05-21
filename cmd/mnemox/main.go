@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"mnemox/internal/app"
+	"github.com/pridhvi/mnemox/internal/app"
 )
 
 func main() {

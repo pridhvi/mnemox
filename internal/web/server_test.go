@@ -12,8 +12,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
-	"mnemox/internal/vault"
+	"github.com/pridhvi/mnemox/internal/vault"
 )
 
 func TestWebAPIWorkflowAndCredentialRedaction(t *testing.T) {
@@ -308,6 +309,83 @@ func TestWebAPIBoundaryRequiresTokenOriginAndJSON(t *testing.T) {
 	req = rawJSONRequest(t, http.MethodPost, ts.URL+"/api/unlock", map[string]any{"passphrase": "test-passphrase"})
 	req.Header.Set(apiTokenHeader, token)
 	expectStatus(t, req, http.StatusOK)
+}
+
+func TestRemoteBasicAuthWrapsStatusAndKeepsAPIToken(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".mnemox")
+	v, err := vault.CreateWithPassphrase(root, "ACME", "test-passphrase")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = v.Close()
+
+	server := New(Options{
+		VaultPath: root,
+		Addr:      "127.0.0.1:0",
+		BasicAuth: &BasicAuth{Username: "operator", Password: "secret"},
+	})
+	ts := httptest.NewServer(server.routes())
+	defer ts.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/status", nil)
+	expectStatus(t, req, http.StatusUnauthorized)
+
+	req, _ = http.NewRequest(http.MethodGet, ts.URL+"/api/status", nil)
+	req.SetBasicAuth("operator", "wrong")
+	expectStatus(t, req, http.StatusUnauthorized)
+
+	req, _ = http.NewRequest(http.MethodGet, ts.URL+"/api/status", nil)
+	req.SetBasicAuth("operator", "secret")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var status map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d: %#v", resp.StatusCode, status)
+	}
+	token := status["api_token"].(string)
+
+	req = rawJSONRequest(t, http.MethodPost, ts.URL+"/api/unlock", map[string]any{"passphrase": "test-passphrase"})
+	req.SetBasicAuth("operator", "secret")
+	expectStatus(t, req, http.StatusForbidden)
+
+	req = rawJSONRequest(t, http.MethodPost, ts.URL+"/api/unlock", map[string]any{"passphrase": "test-passphrase"})
+	req.SetBasicAuth("operator", "secret")
+	req.Header.Set(apiTokenHeader, token)
+	expectStatus(t, req, http.StatusOK)
+}
+
+func TestIdleTimeoutLocksVault(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".mnemox")
+	v, err := vault.CreateWithPassphrase(root, "ACME", "test-passphrase")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = v.Close()
+
+	server := New(Options{VaultPath: root, Addr: "127.0.0.1:0", LockAfter: 20 * time.Millisecond})
+	ts := httptest.NewServer(server.routes())
+	defer ts.Close()
+
+	postJSON(t, ts.URL+"/api/unlock", map[string]any{"passphrase": "test-passphrase"}, http.StatusOK)
+	time.Sleep(50 * time.Millisecond)
+	getJSON(t, ts.URL+"/api/findings", http.StatusUnauthorized)
+	status := getJSON(t, ts.URL+"/api/status", http.StatusOK)
+	if status["unlocked"] != false {
+		t.Fatalf("expected locked status after idle timeout: %#v", status)
+	}
+
+	disabled := New(Options{VaultPath: root, Addr: "127.0.0.1:0", LockAfter: 0})
+	tsDisabled := httptest.NewServer(disabled.routes())
+	defer tsDisabled.Close()
+	postJSON(t, tsDisabled.URL+"/api/unlock", map[string]any{"passphrase": "test-passphrase"}, http.StatusOK)
+	time.Sleep(50 * time.Millisecond)
+	getJSON(t, tsDisabled.URL+"/api/findings", http.StatusOK)
 }
 
 func TestAssetMergeMovesRelationsAndRedactsCredentialContext(t *testing.T) {

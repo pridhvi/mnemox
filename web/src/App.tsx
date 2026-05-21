@@ -19,7 +19,7 @@ import {
   Upload,
 } from 'lucide-react';
 import { type DragEvent, type ElementType, type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { api } from './api';
+import { api, sessionLockedEvent } from './api';
 import { defaultMetrics, metricLabels, metricOptions, metricOrder, metricsFromVector, vectorFromMetrics } from './cvss';
 import type { AssetDetail, AssetDuplicateGroup, AssetDuplicateItem, AttackPath, CvssState, FindingPayload, FindingRecord, OCRStatus, RecordEnvelope, SearchHit } from './types';
 
@@ -78,6 +78,15 @@ export function App() {
   }, [refreshStatus]);
 
   useEffect(() => {
+    const handleSessionLocked = () => {
+      setUnlocked(false);
+      setError('Vault locked after idle timeout.');
+    };
+    window.addEventListener(sessionLockedEvent, handleSessionLocked);
+    return () => window.removeEventListener(sessionLockedEvent, handleSessionLocked);
+  }, []);
+
+  useEffect(() => {
     document.documentElement.dataset.theme = theme;
     document.documentElement.style.colorScheme = theme;
     window.localStorage.setItem('mnemox-theme', theme);
@@ -89,7 +98,10 @@ export function App() {
   }
 
   if (!unlocked) {
-    return <UnlockScreen vaultPath={vaultPath} onUnlocked={() => refreshStatus().then(() => setRefreshKey((v) => v + 1))} />;
+    return <UnlockScreen vaultPath={vaultPath} message={error} onUnlocked={() => refreshStatus().then(() => {
+      setError('');
+      setRefreshKey((v) => v + 1);
+    })} />;
   }
 
   return (
@@ -153,7 +165,7 @@ function LogoMark() {
   );
 }
 
-function UnlockScreen({ vaultPath, onUnlocked }: { vaultPath: string; onUnlocked: () => void }) {
+function UnlockScreen({ vaultPath, message, onUnlocked }: { vaultPath: string; message?: string; onUnlocked: () => void }) {
   const [mode, setMode] = useState<'unlock' | 'init'>('unlock');
   const [name, setName] = useState('Pentest Engagement');
   const [passphrase, setPassphrase] = useState('');
@@ -202,6 +214,7 @@ function UnlockScreen({ vaultPath, onUnlocked }: { vaultPath: string; onUnlocked
           <ShieldCheck size={16} /> {mode === 'init' ? 'Create vault' : 'Unlock vault'}
         </button>
         <p className="muted path">{vaultPath}</p>
+        {message && !error && <div className="notice">{message}</div>}
         {error && <div className="notice error">{error}</div>}
       </form>
     </div>

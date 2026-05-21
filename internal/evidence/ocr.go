@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"strings"
 
-	"mnemox/internal/ocr"
-	"mnemox/internal/vault"
+	"github.com/pridhvi/mnemox/internal/ocr"
+	"github.com/pridhvi/mnemox/internal/vault"
 )
 
 var (

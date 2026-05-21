@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "test": "vitest run --environment jsdom"
+    "test": "vitest run src --environment jsdom",
+    "e2e": "playwright test"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.1.2",

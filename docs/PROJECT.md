@@ -12,15 +12,17 @@ The primary workflow is the local web UI started with `mnemox serve`. The CLI an
 - Vault: local encrypted records and blobs under `.mnemox/`.
 - Frontend: React and TypeScript built as a static SPA.
 - Distribution: compiled frontend embedded into the Go binary.
-- Search: local ranked keyword/fuzzy search plus optional local semantic search with an encrypted vault cache.
+- Search: local ranked keyword/fuzzy search plus deterministic local feature-hashing semantic search with an encrypted vault cache.
 
 ## Security Model
 
 - No cloud service, remote sync, telemetry, or external AI/API calls.
 - Server binds to `127.0.0.1` by default.
-- Vault unlock requires a passphrase or `MNEMOX_PASSPHRASE`.
+- Vault unlock requires a passphrase. CLI passphrases default to an interactive no-echo prompt, with `--passphrase-file` and `--passphrase-stdin` for non-interactive automation.
+- `MNEMOX_PASSPHRASE` is an insecure CI/batch override and is ignored unless `MNEMOX_ALLOW_INSECURE_PASSPHRASE_ENV=1` is also set.
 - The browser never stores the passphrase.
-- The server keeps an in-memory unlocked vault session until lock/logout.
+- The server keeps an in-memory unlocked vault session until lock/logout or idle timeout. `mnemox serve --lock-after` defaults to `30m`; `0` disables.
+- Non-local web binding requires `--allow-remote` and HTTP Basic Auth. The API launch token remains required for `/api/*` except `/api/status`.
 - Credential secrets are excluded from list, search, asset context, attack path, packet, and preview responses.
 - Credential secret reveal is an explicit record-specific action.
 
@@ -72,7 +74,7 @@ The primary workflow is the local web UI started with `mnemox serve`. The CLI an
 - Search includes manually extracted OCR text from screenshot evidence.
 - Credential secrets are excluded.
 - Filters exist for kind, linked asset, tag, and finding status.
-- Optional semantic mode uses deterministic local embeddings stored only in the encrypted vault metadata cache.
+- Optional semantic mode uses deterministic local feature hashing stored only in the encrypted vault metadata cache; it does not download or run a remote embedding model.
 - Evidence citation bundles can render prompt-ready, cited Markdown for a finding and optional asset scope.
 
 ### Attack Paths
@@ -93,4 +95,6 @@ The primary workflow is the local web UI started with `mnemox serve`. The CLI an
 
 ## Near-Term Roadmap Order
 
-1. Release polish: signed artifacts, Homebrew tap, docs site.
+1. Exercise the new operational safety surface in real engagement workflows: passphrase files/stdin, remote Basic Auth, idle auto-lock, and encrypted backup/restore.
+2. Stabilize v2 query migration with large-vault benchmarks and wire indexed candidate lookup into user-facing search once correctness and performance are proven.
+3. Release polish: signed artifacts, Homebrew tap, docs site.

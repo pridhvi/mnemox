@@ -24,6 +24,16 @@ jobs:
         working-directory: web
       - run: npm run build
         working-directory: web
+      - run: npx playwright install --with-deps chromium
+        working-directory: web
+      - run: npm run e2e
+        working-directory: web
       - run: go test ./...
       - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+      - run: go run github.com/securego/gosec/v2/cmd/gosec@latest ./...
       - run: go build -o bin/mnemox ./cmd/mnemox
+      - uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          args: release --snapshot --clean --skip=sign,publish

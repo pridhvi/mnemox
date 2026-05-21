@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"mnemox/internal/search"
+	"github.com/pridhvi/mnemox/internal/search"
 
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
@@ -252,8 +252,10 @@ func (v *Vault) AddRecord(kind string, payload map[string]any) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	_, err = v.DB.Exec(`INSERT INTO records(id, kind, created_at, updated_at, payload) VALUES (?, ?, ?, ?, ?)`, id, kind, now, now, token)
-	return id, err
+	if _, err := v.DB.Exec(`INSERT INTO records(id, kind, created_at, updated_at, payload) VALUES (?, ?, ?, ?, ?)`, id, kind, now, now, token); err != nil {
+		return "", err
+	}
+	return id, v.upsertV2Index(Record{ID: id, Kind: kind, CreatedAt: now, UpdatedAt: now, Payload: payload})
 }
 
 func (v *Vault) UpdateRecord(id string, payload map[string]any) error {
@@ -261,11 +263,20 @@ func (v *Vault) UpdateRecord(id string, payload map[string]any) error {
 	if err != nil {
 		return err
 	}
-	_, err = v.DB.Exec(`UPDATE records SET updated_at = ?, payload = ? WHERE id = ?`, utcNow(), token, id)
-	return err
+	if _, err = v.DB.Exec(`UPDATE records SET updated_at = ?, payload = ? WHERE id = ?`, utcNow(), token, id); err != nil {
+		return err
+	}
+	rec, err := v.GetRecord(id)
+	if err != nil {
+		return err
+	}
+	return v.upsertV2Index(rec)
 }
 
 func (v *Vault) DeleteRecord(id string) error {
+	if err := v.deleteV2Index(id); err != nil {
+		return err
+	}
 	if _, err := v.DB.Exec(`DELETE FROM links WHERE src_id = ? OR dst_id = ?`, id, id); err != nil {
 		return err
 	}

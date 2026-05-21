@@ -1,4 +1,4 @@
-module mnemox
+module github.com/pridhvi/mnemox
 
 go 1.26.3
 

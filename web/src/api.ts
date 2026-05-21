@@ -4,6 +4,7 @@ export type ImportResult = { assets: number; findings: number; evidence: number;
 export type CvssScorePayload = { vector?: string; metrics?: Record<string, string>; notes?: string };
 
 let apiToken = '';
+export const sessionLockedEvent = 'mnemox:session-locked';
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers);
@@ -19,6 +20,12 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({ error: response.statusText }));
+    if (response.status === 401 && path !== '/api/status' && path !== '/api/unlock' && path !== '/api/init') {
+      apiToken = '';
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent(sessionLockedEvent, { detail: { path } }));
+      }
+    }
     throw new Error(body.error || response.statusText);
   }
   const payload = await response.json();

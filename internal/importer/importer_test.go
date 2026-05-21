@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"mnemox/internal/vault"
+	"github.com/pridhvi/mnemox/internal/vault"
 )
 
 func TestNmapXMLImportsAssets(t *testing.T) {

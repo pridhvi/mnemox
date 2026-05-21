@@ -2,6 +2,8 @@ package web
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
 	"embed"
 	"encoding/base64"
 	"encoding/json"
@@ -20,12 +22,12 @@ import (
 	"sync"
 	"time"
 
-	"mnemox/internal/cvss"
-	"mnemox/internal/domain"
-	evidencepkg "mnemox/internal/evidence"
-	"mnemox/internal/importer"
-	"mnemox/internal/packet"
-	"mnemox/internal/vault"
+	"github.com/pridhvi/mnemox/internal/cvss"
+	"github.com/pridhvi/mnemox/internal/domain"
+	evidencepkg "github.com/pridhvi/mnemox/internal/evidence"
+	"github.com/pridhvi/mnemox/internal/importer"
+	"github.com/pridhvi/mnemox/internal/packet"
+	"github.com/pridhvi/mnemox/internal/vault"
 )
 
 //go:embed static
@@ -40,17 +42,27 @@ const (
 )
 
 type Server struct {
-	vaultPath string
-	addr      string
-	apiToken  string
-	mu        sync.Mutex
-	vault     *vault.Vault
-	unlocked  bool
+	vaultPath    string
+	addr         string
+	apiToken     string
+	lockAfter    time.Duration
+	basicAuth    *BasicAuth
+	mu           sync.Mutex
+	vault        *vault.Vault
+	unlocked     bool
+	lastActivity time.Time
 }
 
 type Options struct {
 	VaultPath string
 	Addr      string
+	LockAfter time.Duration
+	BasicAuth *BasicAuth
+}
+
+type BasicAuth struct {
+	Username string
+	Password string
 }
 
 func New(options Options) *Server {
@@ -60,7 +72,7 @@ func New(options Options) *Server {
 	if options.Addr == "" {
 		options.Addr = "127.0.0.1:8787"
 	}
-	return &Server{vaultPath: options.VaultPath, addr: options.Addr, apiToken: newAPIToken()}
+	return &Server{vaultPath: options.VaultPath, addr: options.Addr, apiToken: newAPIToken(), lockAfter: options.LockAfter, basicAuth: options.BasicAuth}
 }
 
 func (s *Server) ListenAndServe() error {
@@ -137,7 +149,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/search", s.requireUnlock(s.handleSearch))
 	mux.HandleFunc("GET /api/settings", s.requireUnlock(s.handleSettings))
 	mux.Handle("/", spaHandler())
-	return secureHeaders(s.trustBoundary(mux))
+	return secureHeaders(s.basicAuthBoundary(s.trustBoundary(mux)))
 }
 
 func (s *Server) URL(listener net.Listener) string {
@@ -146,12 +158,40 @@ func (s *Server) URL(listener net.Listener) string {
 
 func (s *Server) requireUnlock(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if s.currentVault() == nil {
+		if !s.touchActivity() {
 			writeError(w, http.StatusUnauthorized, "vault is locked")
 			return
 		}
 		next(w, r)
 	}
+}
+
+func (s *Server) basicAuthBoundary(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.basicAuth == nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if !s.validBasicAuth(r) {
+			w.Header().Set("WWW-Authenticate", `Basic realm="Mnemox"`)
+			writeError(w, http.StatusUnauthorized, "authentication required")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) validBasicAuth(r *http.Request) bool {
+	username, password, ok := r.BasicAuth()
+	if !ok {
+		return false
+	}
+	usernameHash := sha256.Sum256([]byte(username))
+	expectedUsernameHash := sha256.Sum256([]byte(s.basicAuth.Username))
+	passwordHash := sha256.Sum256([]byte(password))
+	expectedPasswordHash := sha256.Sum256([]byte(s.basicAuth.Password))
+	return subtle.ConstantTimeCompare(usernameHash[:], expectedUsernameHash[:]) == 1 &&
+		subtle.ConstantTimeCompare(passwordHash[:], expectedPasswordHash[:]) == 1
 }
 
 func (s *Server) trustBoundary(next http.Handler) http.Handler {
@@ -195,9 +235,61 @@ func (s *Server) currentVault() *vault.Vault {
 	return s.vault
 }
 
+func (s *Server) statusUnlocked() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.enforceIdleTimeoutLocked(time.Now())
+	return s.vault != nil
+}
+
+func (s *Server) touchActivity() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	s.enforceIdleTimeoutLocked(now)
+	if s.vault == nil {
+		return false
+	}
+	s.lastActivity = now
+	return true
+}
+
+func (s *Server) setVault(v *vault.Vault) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.vault != nil {
+		_ = s.vault.Close()
+	}
+	s.vault = v
+	s.unlocked = v != nil
+	if v == nil {
+		s.lastActivity = time.Time{}
+		return
+	}
+	s.lastActivity = time.Now()
+}
+
+func (s *Server) enforceIdleTimeoutLocked(now time.Time) {
+	if s.lockAfter <= 0 || s.vault == nil || s.lastActivity.IsZero() {
+		return
+	}
+	if now.Sub(s.lastActivity) >= s.lockAfter {
+		s.closeVaultLocked()
+	}
+}
+
+func (s *Server) closeVaultLocked() {
+	if s.vault != nil {
+		_ = s.vault.Close()
+	}
+	s.vault = nil
+	s.unlocked = false
+	s.lastActivity = time.Time{}
+}
+
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"unlocked":   s.currentVault() != nil,
+		"unlocked":   s.statusUnlocked(),
 		"vault_path": s.vaultPath,
 		"api_token":  s.apiToken,
 	})
@@ -221,13 +313,7 @@ func (s *Server) handleUnlock(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, err.Error())
 		return
 	}
-	s.mu.Lock()
-	if s.vault != nil {
-		_ = s.vault.Close()
-	}
-	s.vault = v
-	s.unlocked = true
-	s.mu.Unlock()
+	s.setVault(v)
 	writeJSON(w, http.StatusOK, map[string]any{"unlocked": true})
 }
 
@@ -252,23 +338,13 @@ func (s *Server) handleInit(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	s.mu.Lock()
-	if s.vault != nil {
-		_ = s.vault.Close()
-	}
-	s.vault = v
-	s.unlocked = true
-	s.mu.Unlock()
+	s.setVault(v)
 	writeJSON(w, http.StatusCreated, map[string]any{"unlocked": true})
 }
 
 func (s *Server) handleLock(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
-	if s.vault != nil {
-		_ = s.vault.Close()
-	}
-	s.vault = nil
-	s.unlocked = false
+	s.closeVaultLocked()
 	s.mu.Unlock()
 	writeJSON(w, http.StatusOK, map[string]any{"unlocked": false})
 }

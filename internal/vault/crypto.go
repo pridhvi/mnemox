@@ -7,7 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"strings"
+	"sync"
 
 	"golang.org/x/crypto/argon2"
 	"golang.org/x/crypto/chacha20poly1305"
@@ -34,6 +37,30 @@ type cipherBox struct {
 	key []byte
 }
 
+type PassphraseOptions struct {
+	FromStdin bool
+	File      string
+}
+
+var passphraseSource struct {
+	sync.RWMutex
+	options PassphraseOptions
+}
+
+func ConfigurePassphraseSource(options PassphraseOptions) error {
+	if options.FromStdin && options.File != "" {
+		return errors.New("--passphrase-stdin and --passphrase-file cannot be used together")
+	}
+	passphraseSource.Lock()
+	passphraseSource.options = options
+	passphraseSource.Unlock()
+	return nil
+}
+
+func ReadPassphrase(confirm bool) (string, error) {
+	return readPassphrase(confirm)
+}
+
 func newCryptoConfig() (CryptoConfig, error) {
 	salt := make([]byte, 16)
 	if _, err := rand.Read(salt); err != nil {
@@ -49,7 +76,25 @@ func newCryptoConfig() (CryptoConfig, error) {
 }
 
 func readPassphrase(confirm bool) (string, error) {
+	options := configuredPassphraseOptions()
+	if options.FromStdin {
+		data, err := io.ReadAll(io.LimitReader(os.Stdin, 1<<20))
+		if err != nil {
+			return "", err
+		}
+		return cleanPassphrase(data)
+	}
+	if options.File != "" {
+		data, err := os.ReadFile(options.File) // #nosec G304 -- passphrase file path is explicitly supplied by the operator.
+		if err != nil {
+			return "", err
+		}
+		return cleanPassphrase(data)
+	}
 	if pass := os.Getenv("MNEMOX_PASSPHRASE"); pass != "" {
+		if os.Getenv("MNEMOX_ALLOW_INSECURE_PASSPHRASE_ENV") != "1" {
+			return "", errors.New("MNEMOX_PASSPHRASE is disabled unless MNEMOX_ALLOW_INSECURE_PASSPHRASE_ENV=1 is set")
+		}
 		return pass, nil
 	}
 	fmt.Print("Mnemox passphrase: ")
@@ -73,6 +118,20 @@ func readPassphrase(confirm bool) (string, error) {
 		return "", errors.New("passphrase cannot be empty")
 	}
 	return string(first), nil
+}
+
+func configuredPassphraseOptions() PassphraseOptions {
+	passphraseSource.RLock()
+	defer passphraseSource.RUnlock()
+	return passphraseSource.options
+}
+
+func cleanPassphrase(data []byte) (string, error) {
+	passphrase := strings.TrimRight(string(data), "\r\n")
+	if passphrase == "" {
+		return "", errors.New("passphrase cannot be empty")
+	}
+	return passphrase, nil
 }
 
 func newCipherBox(passphrase string, cfg CryptoConfig) (*cipherBox, error) {

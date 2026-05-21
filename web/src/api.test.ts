@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { api } from './api';
+import { api, sessionLockedEvent } from './api';
 
 describe('api search', () => {
   afterEach(() => {
@@ -78,5 +78,28 @@ describe('api evidence OCR', () => {
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/ocr/status', expect.any(Object));
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/evidence/evidence-1/ocr', expect.objectContaining({ method: 'POST' }));
+  });
+});
+
+describe('api session lock handling', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('dispatches a session event when protected APIs return 401', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: false,
+      status: 401,
+      statusText: 'Unauthorized',
+      json: async () => ({ error: 'vault is locked' }),
+    })) as unknown as typeof fetch;
+    vi.stubGlobal('fetch', fetchMock);
+    const listener = vi.fn();
+    window.addEventListener(sessionLockedEvent, listener);
+
+    await expect(api.listFindings()).rejects.toThrow('vault is locked');
+
+    expect(listener).toHaveBeenCalledOnce();
+    window.removeEventListener(sessionLockedEvent, listener);
   });
 });

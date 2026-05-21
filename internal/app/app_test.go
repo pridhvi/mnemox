@@ -71,7 +71,11 @@ func run(t *testing.T, bin, cwd string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command(bin, args...)
 	cmd.Dir = cwd
-	cmd.Env = append(os.Environ(), "MNEMOX_PASSPHRASE=test-passphrase", "MNEMOX_VAULT="+filepath.Join(cwd, ".mnemox"))
+	cmd.Env = append(os.Environ(),
+		"MNEMOX_PASSPHRASE=test-passphrase",
+		"MNEMOX_ALLOW_INSECURE_PASSPHRASE_ENV=1",
+		"MNEMOX_VAULT="+filepath.Join(cwd, ".mnemox"),
+	)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("%s %v failed: %v\n%s", bin, args, err, out)

@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"mnemox/internal/domain"
-	"mnemox/internal/vault"
+	"github.com/pridhvi/mnemox/internal/domain"
+	"github.com/pridhvi/mnemox/internal/vault"
 )
 
 type Result struct {

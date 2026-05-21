@@ -53,6 +53,28 @@ This is the canonical implementation backlog. Keep it synchronized with code cha
 
 - [x] GitHub Actions CI for Go and web checks.
 - [x] GoReleaser config for cross-platform binaries.
-- [ ] Signed release artifacts.
+- [x] Playwright smoke tests for the embedded web workflow.
+- [x] CI jobs for Playwright E2E, `govulncheck`, `gosec`, and GoReleaser snapshot validation.
+- [x] Signed checksum artifacts for tagged releases through GoReleaser and cosign.
 - [ ] Homebrew tap.
 - [ ] Documentation site.
+
+## Milestone 6: Operational Safety
+
+- [x] Interactive no-echo passphrase remains the default CLI path.
+- [x] `MNEMOX_PASSPHRASE` requires `MNEMOX_ALLOW_INSECURE_PASSPHRASE_ENV=1`.
+- [x] `--passphrase-stdin` and `--passphrase-file` for non-interactive workflows.
+- [x] Web idle auto-lock with `mnemox serve --lock-after`, default `30m`.
+- [x] HTTP Basic Auth required when `--allow-remote` is used.
+- [x] Full encrypted backup create/restore commands.
+- [x] Module path is `github.com/pridhvi/mnemox`.
+
+## Milestone 7: Vault v2 Query Model
+
+- [x] Explicit `vault migrate-v2` command with automatic encrypted backup.
+- [x] HKDF-derived payload, blob, metadata, and blind-index subkeys.
+- [x] Encrypted v2 query field rows.
+- [x] HMAC blind-index token table for kind/status/tag/asset/title/search candidate lookup.
+- [x] Credential secrets excluded from v2 indexes.
+- [x] Large-vault benchmark comparing current full-scan search and v2 candidate lookup.
+- [ ] Wire v2 candidate lookup into the default user-facing search path after benchmark review.

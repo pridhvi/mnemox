@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"mnemox/internal/vault"
+	"github.com/pridhvi/mnemox/internal/vault"
 )
 
 type CitationBundleOptions struct {
