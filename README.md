@@ -49,6 +49,12 @@ Non-local bind addresses require `--allow-remote` and HTTP Basic Auth:
 
 The Basic Auth layer protects the SPA and APIs before the vault unlock flow.
 The existing API launch token remains required for API mutations and reads.
+That token is generated randomly every time `mnemox serve` starts, exposed only
+through same-origin `GET /api/status`, kept in the SPA's memory, and sent as
+`X-Mnemox-Api-Token` on `/api/*` requests except `/api/status`. It is a
+same-origin request guard, not a replacement for Basic Auth or the vault
+passphrase. Direct API clients should fetch `/api/status` first, then include
+the returned `api_token` header value.
 
 By default, Mnemox uses `.mnemox/` in the current directory. Set
 `MNEMOX_VAULT=/path/to/.mnemox` or pass `--vault /path/to/.mnemox`.
@@ -129,7 +135,12 @@ embedding model. Credential secrets are excluded from searchable material.
 
 Remote web access is opt-in. `--allow-remote` requires HTTP Basic Auth, and web
 sessions auto-lock after an idle timeout unless disabled. The browser never
-stores the vault passphrase.
+stores the vault passphrase. The unlocked vault is shared process state: any
+lock/logout or idle timeout closes it for all connected browser windows, and a
+server restart always drops the unlocked state and generates a new API launch
+token. When Basic Auth uses `--basic-auth-password-file`, the password file is
+checked per request, so rotating that file invalidates the old Basic Auth
+password immediately.
 
 Screenshot OCR is manual and local-only. If the optional `tesseract` binary is
 available on `PATH`, Mnemox can extract text from image evidence and store it as

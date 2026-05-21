@@ -22,7 +22,10 @@ The primary workflow is the local web UI started with `mnemox serve`. The CLI an
 - `MNEMOX_PASSPHRASE` is an insecure CI/batch override and is ignored unless `MNEMOX_ALLOW_INSECURE_PASSPHRASE_ENV=1` is also set.
 - The browser never stores the passphrase.
 - The server keeps an in-memory unlocked vault session until lock/logout or idle timeout. `mnemox serve --lock-after` defaults to `30m`; `0` disables.
+- The unlocked vault is shared server process state, not per-browser state. Any lock/logout or idle timeout closes it for all connected browsers. Server restart always drops the unlocked vault and generates a new API launch token.
 - Non-local web binding requires `--allow-remote` and HTTP Basic Auth. The API launch token remains required for `/api/*` except `/api/status`.
+- The API launch token is a per-process random token returned by same-origin `GET /api/status`, kept in SPA memory, and sent as `X-Mnemox-Api-Token`. It is a request-boundary/CSRF guard, not an authentication substitute.
+- Basic Auth is stateless at the HTTP layer. When configured with `--basic-auth-password-file`, the password file is checked per request so file rotation invalidates the old Basic Auth password immediately.
 - Credential secrets are excluded from list, search, asset context, attack path, packet, and preview responses.
 - Credential secret reveal is an explicit record-specific action.
 
@@ -70,12 +73,21 @@ The primary workflow is the local web UI started with `mnemox serve`. The CLI an
 
 ### Search
 
-- Search findings, notes, evidence metadata, asset metadata, and credential metadata.
+- Current user-facing search still decrypts records at runtime and ranks findings, notes, evidence metadata, asset metadata, and credential metadata in process.
 - Search includes manually extracted OCR text from screenshot evidence.
 - Credential secrets are excluded.
 - Filters exist for kind, linked asset, tag, and finding status.
 - Optional semantic mode uses deterministic local feature hashing stored only in the encrypted vault metadata cache; it does not download or run a remote embedding model.
 - Evidence citation bundles can render prompt-ready, cited Markdown for a finding and optional asset scope.
+
+### Vault v2 Query Direction
+
+- `vault migrate-v2` is an explicit one-way migration command that creates an encrypted backup before adding v2 query structures.
+- v2 keeps the pure-Go SQLite distribution and current local-first/no-cloud model.
+- The migration derives separate HKDF subkeys from the Argon2id root key for payload, blob, metadata, and blind-index use.
+- Full record payloads remain encrypted. Queryable field rows are encrypted in SQLite, and candidate lookup uses HMAC blind-index tokens for kind, status, tag, asset, title, and search terms.
+- Credential secrets must never enter semantic caches, encrypted query fields, or blind-index token tables.
+- v2 candidate lookup is benchmarked but not yet wired into default user-facing search; that should happen only after benchmark and correctness review.
 
 ### Attack Paths
 

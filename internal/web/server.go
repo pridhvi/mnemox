@@ -61,8 +61,9 @@ type Options struct {
 }
 
 type BasicAuth struct {
-	Username string
-	Password string
+	Username     string
+	Password     string
+	PasswordFile string
 }
 
 func New(options Options) *Server {
@@ -186,12 +187,27 @@ func (s *Server) validBasicAuth(r *http.Request) bool {
 	if !ok {
 		return false
 	}
+	expectedPassword, err := s.basicAuth.expectedPassword()
+	if err != nil {
+		return false
+	}
 	usernameHash := sha256.Sum256([]byte(username))
 	expectedUsernameHash := sha256.Sum256([]byte(s.basicAuth.Username))
 	passwordHash := sha256.Sum256([]byte(password))
-	expectedPasswordHash := sha256.Sum256([]byte(s.basicAuth.Password))
+	expectedPasswordHash := sha256.Sum256([]byte(expectedPassword))
 	return subtle.ConstantTimeCompare(usernameHash[:], expectedUsernameHash[:]) == 1 &&
 		subtle.ConstantTimeCompare(passwordHash[:], expectedPasswordHash[:]) == 1
+}
+
+func (auth *BasicAuth) expectedPassword() (string, error) {
+	if auth.PasswordFile == "" {
+		return auth.Password, nil
+	}
+	data, err := os.ReadFile(auth.PasswordFile) // #nosec G304 -- Basic Auth password file path is explicitly supplied by the operator.
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimRight(string(data), "\r\n"), nil
 }
 
 func (s *Server) trustBoundary(next http.Handler) http.Handler {

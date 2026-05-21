@@ -360,6 +360,42 @@ func TestRemoteBasicAuthWrapsStatusAndKeepsAPIToken(t *testing.T) {
 	expectStatus(t, req, http.StatusOK)
 }
 
+func TestBasicAuthPasswordFileReloadsPerRequest(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".mnemox")
+	v, err := vault.CreateWithPassphrase(root, "ACME", "test-passphrase")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = v.Close()
+	passwordFile := filepath.Join(t.TempDir(), "basic-auth-password")
+	if err := os.WriteFile(passwordFile, []byte("first\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	server := New(Options{
+		VaultPath: root,
+		Addr:      "127.0.0.1:0",
+		BasicAuth: &BasicAuth{Username: "operator", PasswordFile: passwordFile},
+	})
+	ts := httptest.NewServer(server.routes())
+	defer ts.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/status", nil)
+	req.SetBasicAuth("operator", "first")
+	expectStatus(t, req, http.StatusOK)
+
+	if err := os.WriteFile(passwordFile, []byte("second\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	req, _ = http.NewRequest(http.MethodGet, ts.URL+"/api/status", nil)
+	req.SetBasicAuth("operator", "first")
+	expectStatus(t, req, http.StatusUnauthorized)
+
+	req, _ = http.NewRequest(http.MethodGet, ts.URL+"/api/status", nil)
+	req.SetBasicAuth("operator", "second")
+	expectStatus(t, req, http.StatusOK)
+}
+
 func TestIdleTimeoutLocksVault(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".mnemox")
 	v, err := vault.CreateWithPassphrase(root, "ACME", "test-passphrase")

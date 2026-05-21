@@ -812,6 +812,9 @@ func basicAuthConfig(enabled bool, username, passwordFile string) (*web.BasicAut
 	if password == "" {
 		return nil, fmt.Errorf("Basic Auth password cannot be empty")
 	}
+	if passwordFile != "" {
+		return &web.BasicAuth{Username: username, PasswordFile: passwordFile}, nil
+	}
 	return &web.BasicAuth{Username: username, Password: password}, nil
 }
 
