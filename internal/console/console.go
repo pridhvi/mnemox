@@ -2,12 +2,13 @@ package console
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/chzyer/readline"
 	"github.com/google/shlex"
 	"golang.org/x/term"
-	"os"
 )
 
 type ExecuteFunc func(args []string) error
@@ -15,7 +16,7 @@ type ExecuteFunc func(args []string) error
 func Run(exec ExecuteFunc, vaultPath string) error {
 	rl, err := readline.NewEx(&readline.Config{
 		Prompt:          "mnemox > ",
-		HistoryFile:     "/tmp/mnemox_history",
+		HistoryFile:     historyFile(),
 		InterruptPrompt: "^C",
 		EOFPrompt:       "exit",
 	})
@@ -59,4 +60,16 @@ func ReadSecret() (string, error) {
 	value, err := term.ReadPassword(int(os.Stdin.Fd()))
 	fmt.Println()
 	return string(value), err
+}
+
+func historyFile() string {
+	dir, err := os.UserCacheDir()
+	if err != nil || strings.TrimSpace(dir) == "" {
+		return filepath.Join(os.TempDir(), "mnemox_history")
+	}
+	dir = filepath.Join(dir, "mnemox")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return filepath.Join(os.TempDir(), "mnemox_history")
+	}
+	return filepath.Join(dir, "history")
 }

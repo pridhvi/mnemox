@@ -69,7 +69,91 @@ func (v *Vault) MigrateV2(backupPath string) (string, error) {
 }
 
 func (v *Vault) V2SearchCandidateIDs(query string, limit int) ([]string, error) {
+	ids, _, err := v.v2CandidateIDs(query, SearchFilters{}, limit)
+	return ids, err
+}
+
+func (v *Vault) v2FilteredCandidateRecords(query string, filters SearchFilters) ([]Record, bool, error) {
+	if !v.v2TablesReady() {
+		return nil, false, nil
+	}
+	ids, constrained, err := v.v2CandidateIDs(query, filters, 0)
+	if err != nil || !constrained {
+		return nil, constrained, err
+	}
+	if len(ids) == 0 {
+		return []Record{}, true, nil
+	}
+	records, err := v.RecordsByIDs(ids)
+	if err != nil {
+		return nil, true, err
+	}
+	return filterRecords(records, filters), true, nil
+}
+
+func (v *Vault) v2CandidateIDs(query string, filters SearchFilters, limit int) ([]string, bool, error) {
+	if !v.v2TablesReady() {
+		return nil, false, nil
+	}
 	tokens := v2Tokens(query)
+	kind := normalizedKind(filters.Kind)
+	status := normalizedFilter(filters.Status)
+	tag := normalizedFilter(filters.Tag)
+	var candidates map[string]struct{}
+	constrained := false
+
+	if len(tokens) > 0 {
+		ids, err := v.v2IDsForFieldTokens("search", tokens, true)
+		if err != nil {
+			return nil, true, err
+		}
+		candidates = intersectCandidateSet(candidates, ids, constrained)
+		constrained = true
+	}
+	if kind != "" {
+		ids, err := v.v2IDsForFieldTokens("kind", []string{kind}, true)
+		if err != nil {
+			return nil, true, err
+		}
+		candidates = intersectCandidateSet(candidates, ids, constrained)
+		constrained = true
+	}
+	if tag != "" {
+		ids, err := v.v2IDsForFieldTokens("tag", []string{tag}, true)
+		if err != nil {
+			return nil, true, err
+		}
+		candidates = intersectCandidateSet(candidates, ids, constrained)
+		constrained = true
+	}
+	if status != "" {
+		ids, err := v.v2IDsForFieldTokens("status", []string{status}, true)
+		if err != nil {
+			return nil, true, err
+		}
+		candidates = intersectCandidateSet(candidates, ids, constrained)
+		constrained = true
+	}
+	if filters.AssetID != "" {
+		ids, err := v.assetRelatedRecordIDs(filters)
+		if err != nil {
+			return nil, true, err
+		}
+		candidates = intersectCandidateSet(candidates, ids, constrained)
+		constrained = true
+	}
+	if !constrained {
+		return nil, false, nil
+	}
+	out := candidateSetValues(candidates)
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, true, nil
+}
+
+func (v *Vault) v2IDsForFieldTokens(field string, tokens []string, anyToken bool) ([]string, error) {
+	tokens = uniqueStrings(tokens)
 	if len(tokens) == 0 {
 		return nil, nil
 	}
@@ -78,11 +162,11 @@ func (v *Vault) V2SearchCandidateIDs(query string, limit int) ([]string, error) 
 		return nil, err
 	}
 	placeholders := make([]string, 0, len(tokens))
-	args := make([]any, 0, len(tokens)+2)
-	args = append(args, "search")
+	args := make([]any, 0, len(tokens)+1)
+	args = append(args, field)
 	for _, token := range tokens {
 		placeholders = append(placeholders, "?")
-		args = append(args, blindIndexToken(keys.blindIndex, "search", token))
+		args = append(args, blindIndexToken(keys.blindIndex, field, token))
 	}
 	querySQL := fmt.Sprintf(`SELECT record_id
 FROM record_index_v2
@@ -90,9 +174,15 @@ WHERE field = ? AND token IN (%s)
 GROUP BY record_id
 ORDER BY COUNT(*) DESC, record_id
 `, strings.Join(placeholders, ",")) // #nosec G201 -- the formatted fragment is only generated "?" placeholders; values stay parameterized.
-	if limit > 0 {
-		querySQL += "LIMIT ?"
-		args = append(args, limit)
+	if !anyToken {
+		querySQL = fmt.Sprintf(`SELECT record_id
+FROM record_index_v2
+WHERE field = ? AND token IN (%s)
+GROUP BY record_id
+HAVING COUNT(DISTINCT token) = ?
+ORDER BY record_id
+`, strings.Join(placeholders, ",")) // #nosec G201 -- the formatted fragment is only generated "?" placeholders; values stay parameterized.
+		args = append(args, len(tokens))
 	}
 	rows, err := v.DB.Query(querySQL, args...)
 	if err != nil {
@@ -374,6 +464,164 @@ func uniqueStrings(values []string) []string {
 		}
 		seen[value] = true
 		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (v *Vault) RecordsByIDs(ids []string) ([]Record, error) {
+	records := make([]Record, 0, len(ids))
+	for _, id := range ids {
+		rec, err := v.GetRecord(id)
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, rec)
+	}
+	return records, nil
+}
+
+func (v *Vault) assetRelatedRecords(filters SearchFilters) ([]Record, error) {
+	ids, err := v.assetRelatedRecordIDs(filters)
+	if err != nil {
+		return nil, err
+	}
+	records, err := v.RecordsByIDs(ids)
+	if err != nil {
+		return nil, err
+	}
+	return filterRecords(records, filters), nil
+}
+
+func (v *Vault) assetRelatedRecordIDs(filters SearchFilters) ([]string, error) {
+	asset, err := v.GetRecord(filters.AssetID)
+	if err != nil {
+		return nil, err
+	}
+	if asset.Kind != "asset" {
+		return nil, fmt.Errorf("record is not an asset")
+	}
+	kind := normalizedKind(filters.Kind)
+	type relation struct {
+		kind string
+		name string
+	}
+	relations := []relation{
+		{kind: "finding", name: "affects_asset"},
+		{kind: "evidence", name: "evidence_asset"},
+		{kind: "note", name: "note_asset"},
+		{kind: "credential", name: "credential_asset"},
+	}
+	var out []string
+	seen := map[string]bool{}
+	add := func(id string) {
+		if id != "" && !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	if kind == "" || kind == "asset" {
+		add(filters.AssetID)
+	}
+	for _, rel := range relations {
+		if kind != "" && kind != rel.kind {
+			continue
+		}
+		rows, err := v.DB.Query(`SELECT src_id FROM links WHERE dst_id = ? AND relation = ? ORDER BY created_at`, filters.AssetID, rel.name)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+			add(id)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func filterRecords(records []Record, filters SearchFilters) []Record {
+	kind := normalizedKind(filters.Kind)
+	tag := normalizedFilter(filters.Tag)
+	status := normalizedFilter(filters.Status)
+	if kind == "" && tag == "" && status == "" {
+		return records
+	}
+	filtered := make([]Record, 0, len(records))
+	for _, rec := range records {
+		if kind != "" && rec.Kind != kind {
+			continue
+		}
+		if tag != "" && !recordHasTag(rec, tag) {
+			continue
+		}
+		if status != "" && !recordHasStatus(rec, status) {
+			continue
+		}
+		filtered = append(filtered, rec)
+	}
+	return filtered
+}
+
+func recordHasTag(rec Record, tag string) bool {
+	for _, candidate := range valuesForKeys(rec.Payload, "tags") {
+		if strings.EqualFold(strings.TrimSpace(candidate), tag) {
+			return true
+		}
+	}
+	return false
+}
+
+func recordHasStatus(rec Record, status string) bool {
+	return rec.Kind == "finding" && strings.EqualFold(strings.TrimSpace(stringValue(rec.Payload["status"])), status)
+}
+
+func normalizedKind(kind string) string {
+	kind = strings.TrimSpace(kind)
+	if strings.EqualFold(kind, "all") {
+		return ""
+	}
+	return kind
+}
+
+func normalizedFilter(value string) string {
+	value = strings.TrimSpace(value)
+	if strings.EqualFold(value, "all") {
+		return ""
+	}
+	return value
+}
+
+func intersectCandidateSet(current map[string]struct{}, ids []string, hasCurrent bool) map[string]struct{} {
+	next := map[string]struct{}{}
+	if !hasCurrent {
+		for _, id := range ids {
+			next[id] = struct{}{}
+		}
+		return next
+	}
+	lookup := map[string]struct{}{}
+	for _, id := range ids {
+		lookup[id] = struct{}{}
+	}
+	for id := range current {
+		if _, ok := lookup[id]; ok {
+			next[id] = struct{}{}
+		}
+	}
+	return next
+}
+
+func candidateSetValues(candidates map[string]struct{}) []string {
+	out := make([]string, 0, len(candidates))
+	for id := range candidates {
+		out = append(out, id)
 	}
 	sort.Strings(out)
 	return out

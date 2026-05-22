@@ -517,6 +517,10 @@ func blobFileName(id string) (string, error) {
 }
 
 func (v *Vault) Search(query string, limit int) ([]SearchHit, error) {
+	hits, err := v.SearchWithFilters(query, SearchFilters{}, limit)
+	if err == nil {
+		return hits, nil
+	}
 	records, err := v.Records("")
 	if err != nil {
 		return nil, err
@@ -525,11 +529,71 @@ func (v *Vault) Search(query string, limit int) ([]SearchHit, error) {
 }
 
 func (v *Vault) SearchByKind(query, kind string, limit int) ([]SearchHit, error) {
-	records, err := v.Records(kind)
+	return v.SearchWithFilters(query, SearchFilters{Kind: kind}, limit)
+}
+
+type SearchFilters struct {
+	Kind    string
+	AssetID string
+	Tag     string
+	Status  string
+}
+
+func (v *Vault) SearchWithFilters(query string, filters SearchFilters, limit int) ([]SearchHit, error) {
+	if strings.TrimSpace(query) == "" {
+		return nil, nil
+	}
+	records, usedV2, err := v.v2FilteredCandidateRecords(query, filters)
+	if err != nil {
+		return nil, err
+	}
+	if usedV2 {
+		if len(records) == 0 {
+			records, err = v.filteredRecordsFull(filters)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return SearchRecords(records, query, limit), nil
+	}
+	records, err = v.FilteredRecords(filters, 0)
 	if err != nil {
 		return nil, err
 	}
 	return SearchRecords(records, query, limit), nil
+}
+
+func (v *Vault) FilteredRecords(filters SearchFilters, limit int) ([]Record, error) {
+	records, usedV2, err := v.v2FilteredCandidateRecords("", filters)
+	if err != nil {
+		return nil, err
+	}
+	if usedV2 {
+		if limit > 0 && len(records) > limit {
+			return records[:limit], nil
+		}
+		return records, nil
+	}
+	records, err = v.filteredRecordsFull(filters)
+	if err != nil {
+		return nil, err
+	}
+	if limit > 0 && len(records) > limit {
+		return records[:limit], nil
+	}
+	return records, nil
+}
+
+func (v *Vault) filteredRecordsFull(filters SearchFilters) ([]Record, error) {
+	if filters.AssetID != "" {
+		return v.assetRelatedRecords(filters)
+	}
+	kind := normalizedKind(filters.Kind)
+	records, err := v.Records(kind)
+	if err != nil {
+		return nil, err
+	}
+	return filterRecords(records, filters), nil
 }
 
 func (v *Vault) SemanticSearch(query, kind string, limit int) ([]SearchHit, error) {

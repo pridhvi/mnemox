@@ -11,7 +11,7 @@ The primary workflow is the local web UI started with `mnemox serve`. The CLI an
 - Backend: Go standard HTTP server.
 - Vault: local encrypted records and blobs under `.mnemox/`.
 - Frontend: React and TypeScript built as a static SPA.
-- Distribution: compiled frontend embedded into the Go binary.
+- Distribution: compiled frontend embedded into GoReleaser-built GitHub Release binaries.
 - Search: local ranked keyword/fuzzy search plus deterministic local feature-hashing semantic search with an encrypted vault cache.
 
 ## Security Model
@@ -73,7 +73,8 @@ The primary workflow is the local web UI started with `mnemox serve`. The CLI an
 
 ### Search
 
-- Current user-facing search still decrypts records at runtime and ranks findings, notes, evidence metadata, asset metadata, and credential metadata in process.
+- User-facing keyword search ranks findings, notes, evidence metadata, asset metadata, and credential metadata in process.
+- On v1 vaults, keyword search decrypts matching surfaces at runtime. On v2-migrated vaults, keyword search first uses SQLite blind-index candidate lookup, then decrypts and ranks only candidate records.
 - Search includes manually extracted OCR text from screenshot evidence.
 - Credential secrets are excluded.
 - Filters exist for kind, linked asset, tag, and finding status.
@@ -87,7 +88,7 @@ The primary workflow is the local web UI started with `mnemox serve`. The CLI an
 - The migration derives separate HKDF subkeys from the Argon2id root key for payload, blob, metadata, and blind-index use.
 - Full record payloads remain encrypted. Queryable field rows are encrypted in SQLite, and candidate lookup uses HMAC blind-index tokens for kind, status, tag, asset, title, and search terms.
 - Credential secrets must never enter semantic caches, encrypted query fields, or blind-index token tables.
-- v2 candidate lookup is benchmarked but not yet wired into default user-facing search; that should happen only after benchmark and correctness review.
+- v2 candidate lookup is wired into default keyword search for migrated vaults, including kind, tag, status, and linked-asset filters. Semantic search still uses the encrypted deterministic feature-hash cache.
 
 ### Attack Paths
 
@@ -105,8 +106,16 @@ The primary workflow is the local web UI started with `mnemox serve`. The CLI an
 - Screenshot folder import.
 - OCR extraction is manual after upload/import and never calls external services.
 
+## Release Posture
+
+- First release channel is GitHub Releases only, with signed checksum artifacts.
+- macOS and Linux are supported for `amd64` and `arm64`.
+- Windows `amd64` and `arm64` binaries are published as preview artifacts until Windows runtime usage has more mileage.
+- Homebrew is deferred until there is user demand for a maintained tap.
+- Optional OCR requires an external `tesseract` binary on `PATH`; Mnemox does not bundle it.
+
 ## Near-Term Roadmap Order
 
 1. Exercise the new operational safety surface in real engagement workflows: passphrase files/stdin, remote Basic Auth, idle auto-lock, and encrypted backup/restore.
-2. Stabilize v2 query migration with large-vault benchmarks and wire indexed candidate lookup into user-facing search once correctness and performance are proven.
-3. Release polish: signed artifacts, Homebrew tap, docs site.
+2. Stabilize v2 query migration with large-vault benchmarks and migrated-vault search usage.
+3. Release polish: GitHub binary release notes, docs site, and optional Homebrew tap only after demand.

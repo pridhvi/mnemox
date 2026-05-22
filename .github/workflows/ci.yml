@@ -6,7 +6,7 @@ on:
   pull_request:
 
 jobs:
-  test:
+  web-and-release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,12 +28,46 @@ jobs:
         working-directory: web
       - run: npm run e2e
         working-directory: web
-      - run: go test ./...
       - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
       - run: go run github.com/securego/gosec/v2/cmd/gosec@latest ./...
-      - run: go build -o bin/mnemox ./cmd/mnemox
       - uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
           version: '~> v2'
           args: release --snapshot --clean --skip=sign,publish
+
+  platform-smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.3'
+      - run: go test ./...
+      - name: CLI temp-vault smoke
+        run: |
+          set -euo pipefail
+          ext=""
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            ext=".exe"
+          fi
+          mkdir -p bin
+          go build -o "bin/mnemox${ext}" ./cmd/mnemox
+          tmp="$(mktemp -d)"
+          passfile="${tmp}/passphrase"
+          vault="${tmp}/.mnemox"
+          evidence="${tmp}/proof.txt"
+          printf 'test-passphrase\n' > "$passfile"
+          printf 'Jenkins dashboard visible without authentication\n' > "$evidence"
+          "./bin/mnemox${ext}" --vault "$vault" --passphrase-file "$passfile" init --name "CI Smoke"
+          "./bin/mnemox${ext}" --vault "$vault" --passphrase-file "$passfile" asset add ci.acme.local --type host --value 10.0.0.10
+          "./bin/mnemox${ext}" --vault "$vault" --passphrase-file "$passfile" finding add "Jenkins anonymous read" --summary "Jenkins allowed unauthenticated read access." --affected-scope ci.acme.local
+          "./bin/mnemox${ext}" --vault "$vault" --passphrase-file "$passfile" evidence add "$evidence" --finding "Jenkins anonymous read" --caption "Dashboard visible without authentication"
+          "./bin/mnemox${ext}" --vault "$vault" --passphrase-file "$passfile" packet build "Jenkins anonymous read" | grep -q "Dashboard visible without authentication"

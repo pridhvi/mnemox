@@ -56,7 +56,10 @@ This is the canonical implementation backlog. Keep it synchronized with code cha
 - [x] Playwright smoke tests for the embedded web workflow.
 - [x] CI jobs for Playwright E2E, `govulncheck`, `gosec`, and GoReleaser snapshot validation.
 - [x] Signed checksum artifacts for tagged releases through GoReleaser and cosign.
-- [ ] Homebrew tap.
+- [x] GitHub Releases binary-only install docs.
+- [x] Release runbook and release notes template.
+- [x] Native Linux, macOS, and Windows CI smoke checks for Go tests and CLI temp-vault workflow.
+- [ ] Optional Homebrew tap after demand validates the maintenance cost.
 - [ ] Documentation site.
 
 ## Milestone 6: Operational Safety
@@ -77,4 +80,4 @@ This is the canonical implementation backlog. Keep it synchronized with code cha
 - [x] HMAC blind-index token table for kind/status/tag/asset/title/search candidate lookup.
 - [x] Credential secrets excluded from v2 indexes.
 - [x] Large-vault benchmark comparing current full-scan search and v2 candidate lookup.
-- [ ] Wire v2 candidate lookup into the default user-facing search path after benchmark review.
+- [x] Wire v2 candidate lookup into the default keyword search path after benchmark review.

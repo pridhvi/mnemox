@@ -8,6 +8,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -309,6 +310,77 @@ func TestWebAPIBoundaryRequiresTokenOriginAndJSON(t *testing.T) {
 	req = rawJSONRequest(t, http.MethodPost, ts.URL+"/api/unlock", map[string]any{"passphrase": "test-passphrase"})
 	req.Header.Set(apiTokenHeader, token)
 	expectStatus(t, req, http.StatusOK)
+}
+
+func TestWebSearchUsesMigratedV2Filters(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".mnemox")
+	v, err := vault.CreateWithPassphrase(root, "ACME", "test-passphrase")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assetID, err := v.AddRecord("asset", map[string]any{"name": "ci.acme.local", "type": "host", "value": "10.0.0.10", "tags": []string{"prod"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	findingID, err := v.AddRecord("finding", map[string]any{
+		"title":          "Jenkins anonymous read",
+		"status":         "confirmed",
+		"severity":       "MEDIUM",
+		"affected_scope": []string{"ci.acme.local"},
+		"summary":        "Jenkins allowed unauthenticated read access.",
+		"tags":           []string{"prod", "auth"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	credentialID, err := v.AddRecord("credential", map[string]any{
+		"name":     "svc_backup",
+		"username": "svc_backup",
+		"secret":   "super-secret-value",
+		"scope":    "ci.acme.local",
+		"tags":     []string{"prod"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := v.AddLink(findingID, assetID, "affects_asset"); err != nil {
+		t.Fatal(err)
+	}
+	if err := v.AddLink(credentialID, assetID, "credential_asset"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v.MigrateV2(filepath.Join(t.TempDir(), "migration.mnemoxbak")); err != nil {
+		t.Fatal(err)
+	}
+	_ = v.Close()
+
+	server := New(Options{VaultPath: root, Addr: "127.0.0.1:0"})
+	ts := httptest.NewServer(server.routes())
+	defer ts.Close()
+	postJSON(t, ts.URL+"/api/unlock", map[string]any{"passphrase": "test-passphrase"}, http.StatusOK)
+
+	query := url.Values{}
+	query.Set("q", "jenkins")
+	query.Set("kind", "finding")
+	query.Set("asset_id", assetID)
+	query.Set("tag", "prod")
+	query.Set("status", "confirmed")
+	search := getJSON(t, ts.URL+"/api/search?"+query.Encode(), http.StatusOK)
+	items := search["items"].([]any)
+	if len(items) != 1 || items[0].(map[string]any)["ID"] != findingID {
+		t.Fatalf("expected v2-filtered finding search result: %#v", search)
+	}
+
+	tagOnly := getJSON(t, ts.URL+"/api/search?tag=prod", http.StatusOK)
+	encoded, _ := json.Marshal(tagOnly)
+	if !strings.Contains(string(encoded), "Jenkins anonymous read") || !strings.Contains(string(encoded), "svc_backup") {
+		t.Fatalf("expected v2 tag-only search results: %s", encoded)
+	}
+	secret := getJSON(t, ts.URL+"/api/search?q=super-secret-value", http.StatusOK)
+	encoded, _ = json.Marshal(secret)
+	if strings.Contains(string(encoded), "super-secret-value") || strings.Contains(string(encoded), "svc_backup") {
+		t.Fatalf("credential secret was searchable after v2 migration: %s", encoded)
+	}
 }
 
 func TestRemoteBasicAuthWrapsStatusAndKeepsAPIToken(t *testing.T) {

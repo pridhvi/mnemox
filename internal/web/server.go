@@ -1327,27 +1327,25 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	status := r.URL.Query().Get("status")
 	limit := 20
 	v := s.currentVault()
+	filters := vault.SearchFilters{Kind: kind, AssetID: assetID, Tag: tag, Status: status}
 	var hits []vault.SearchHit
-	var records []vault.Record
 	var err error
-	if assetID != "" {
-		records, err = s.assetRelatedRecords(assetID, kind)
-		if err != nil {
+	if strings.TrimSpace(query) != "" && mode != "semantic" {
+		hits, err = v.SearchWithFilters(query, filters, limit)
+	} else if strings.TrimSpace(query) != "" || assetID != "" || strings.TrimSpace(tag) != "" || normalizedStatus(status) != "" {
+		var records []vault.Record
+		records, err = v.FilteredRecords(filters, 0)
+		if err == nil {
+			hits = searchRecordHits(records, query, mode, limit)
+		}
+	}
+	if err != nil {
+		if assetID != "" {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-	} else if kind != "" && kind != "all" {
-		records, err = v.Records(kind)
-	} else {
-		records, err = v.Records("")
-	}
-	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
-	}
-	records = filterSearchRecords(records, tag, status)
-	if strings.TrimSpace(query) != "" || assetID != "" || strings.TrimSpace(tag) != "" || normalizedStatus(status) != "" {
-		hits = searchRecordHits(records, query, mode, limit)
 	}
 	for i := range hits {
 		if hits[i].Kind == "credential" {

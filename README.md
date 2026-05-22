@@ -8,15 +8,43 @@ context completeness checks, and copy-ready attack path Markdown.
 
 ## Install
 
+Download the archive for your OS and CPU from
+[GitHub Releases](https://github.com/pridhvi/mnemox/releases):
+
+- `mnemox_<version>_darwin_amd64.tar.gz`: macOS Intel
+- `mnemox_<version>_darwin_arm64.tar.gz`: macOS Apple Silicon
+- `mnemox_<version>_linux_amd64.tar.gz`: Linux x86_64
+- `mnemox_<version>_linux_arm64.tar.gz`: Linux ARM64
+- `mnemox_<version>_windows_amd64.zip`: Windows x86_64 preview
+- `mnemox_<version>_windows_arm64.zip`: Windows ARM64 preview
+
+Verify the archive checksum before installing:
+
+```bash
+shasum -a 256 -c checksums.txt --ignore-missing
+tar -xzf mnemox_<version>_<os>_<arch>.tar.gz
+install -m 0755 mnemox /usr/local/bin/mnemox
+```
+
+On Windows, compare the `Get-FileHash` SHA256 output with `checksums.txt`, then
+extract the `.zip` and run `mnemox.exe`.
+
+macOS and Linux are the supported release platforms. Windows binaries are
+published as preview artifacts until Windows runtime usage has more mileage.
+
+To build from source:
+
 ```bash
 make build
 ```
 
-Tagged releases can also be installed with:
+Go users can install tagged releases directly:
 
 ```bash
 go install github.com/pridhvi/mnemox/cmd/mnemox@latest
 ```
+
+Homebrew is intentionally deferred until there is demand for a maintained tap.
 
 ## Primary Web Workflow
 
@@ -127,11 +155,13 @@ non-interactive use. Environment passphrases are discouraged and require the
 explicit `MNEMOX_ALLOW_INSECURE_PASSPHRASE_ENV=1` opt-in because environment
 variables can leak through process inspection, shell history, and subprocesses.
 
-This MVP performs local recall over decrypted records at runtime. It does not
-send data to an external AI service. Search supports ranked keyword/fuzzy
-matching and an optional deterministic local feature-hashing semantic mode
-backed by an encrypted vault cache. It does not download or run a remote
-embedding model. Credential secrets are excluded from searchable material.
+Mnemox does not send data to an external AI service. Search supports ranked
+keyword/fuzzy matching and an optional deterministic local feature-hashing
+semantic mode backed by an encrypted vault cache. Vaults migrated with
+`vault migrate-v2` use SQLite blind-index candidate lookup for keyword search
+before decrypting and ranking candidate records. It does not download or run a
+remote embedding model. Credential secrets are excluded from searchable
+material and v2 indexes.
 
 Remote web access is opt-in. `--allow-remote` requires HTTP Basic Auth, and web
 sessions auto-lock after an idle timeout unless disabled. The browser never
@@ -142,9 +172,9 @@ token. When Basic Auth uses `--basic-auth-password-file`, the password file is
 checked per request, so rotating that file invalidates the old Basic Auth
 password immediately.
 
-Screenshot OCR is manual and local-only. If the optional `tesseract` binary is
-available on `PATH`, Mnemox can extract text from image evidence and store it as
-encrypted evidence metadata for search and citation bundles.
+Screenshot OCR is manual and local-only. The optional `tesseract` binary is not
+bundled with Mnemox; install it separately for your OS and make sure it is on
+`PATH` to enable OCR extraction into encrypted evidence metadata.
 
 ## Backlog And Releases
 
@@ -153,3 +183,4 @@ encrypted evidence metadata for search and citation bundles.
 - Codex instructions: [AGENTS.md](AGENTS.md)
 - CI: `.github/workflows/ci.yml`
 - Release config: `.goreleaser.yaml`
+- Release runbook: [RELEASE.md](RELEASE.md)
