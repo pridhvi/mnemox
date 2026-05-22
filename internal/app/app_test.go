@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -58,7 +59,7 @@ func TestSearchFindsEncryptedRecordContents(t *testing.T) {
 func buildBinary(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	bin := filepath.Join(dir, "mnemox")
+	bin := filepath.Join(dir, executableName("mnemox"))
 	cmd := exec.Command("go", "build", "-o", bin, "./cmd/mnemox")
 	cmd.Dir = repoRoot(t)
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -81,6 +82,13 @@ func run(t *testing.T, bin, cwd string, args ...string) string {
 		t.Fatalf("%s %v failed: %v\n%s", bin, args, err, out)
 	}
 	return string(out)
+}
+
+func executableName(name string) string {
+	if runtime.GOOS == "windows" {
+		return name + ".exe"
+	}
+	return name
 }
 
 func repoRoot(t *testing.T) string {

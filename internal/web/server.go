@@ -98,6 +98,19 @@ func (s *Server) Serve(listener net.Listener) error {
 	return server.Serve(listener)
 }
 
+func (s *Server) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.vault == nil {
+		return nil
+	}
+	err := s.vault.Close()
+	s.vault = nil
+	s.unlocked = false
+	s.lastActivity = time.Time{}
+	return err
+}
+
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/status", s.handleStatus)

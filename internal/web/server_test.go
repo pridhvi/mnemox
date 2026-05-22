@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -27,6 +28,7 @@ func TestWebAPIWorkflowAndCredentialRedaction(t *testing.T) {
 	_ = v.Close()
 
 	server := New(Options{VaultPath: root, Addr: "127.0.0.1:0"})
+	defer server.Close()
 	ts := httptest.NewServer(server.routes())
 	defer ts.Close()
 
@@ -275,6 +277,7 @@ func TestWebAPIBoundaryRequiresTokenOriginAndJSON(t *testing.T) {
 	_ = v.Close()
 
 	server := New(Options{VaultPath: root, Addr: "127.0.0.1:0"})
+	defer server.Close()
 	ts := httptest.NewServer(server.routes())
 	defer ts.Close()
 
@@ -355,6 +358,7 @@ func TestWebSearchUsesMigratedV2Filters(t *testing.T) {
 	_ = v.Close()
 
 	server := New(Options{VaultPath: root, Addr: "127.0.0.1:0"})
+	defer server.Close()
 	ts := httptest.NewServer(server.routes())
 	defer ts.Close()
 	postJSON(t, ts.URL+"/api/unlock", map[string]any{"passphrase": "test-passphrase"}, http.StatusOK)
@@ -396,6 +400,7 @@ func TestRemoteBasicAuthWrapsStatusAndKeepsAPIToken(t *testing.T) {
 		Addr:      "127.0.0.1:0",
 		BasicAuth: &BasicAuth{Username: "operator", Password: "secret"},
 	})
+	defer server.Close()
 	ts := httptest.NewServer(server.routes())
 	defer ts.Close()
 
@@ -449,6 +454,7 @@ func TestBasicAuthPasswordFileReloadsPerRequest(t *testing.T) {
 		Addr:      "127.0.0.1:0",
 		BasicAuth: &BasicAuth{Username: "operator", PasswordFile: passwordFile},
 	})
+	defer server.Close()
 	ts := httptest.NewServer(server.routes())
 	defer ts.Close()
 
@@ -477,6 +483,7 @@ func TestIdleTimeoutLocksVault(t *testing.T) {
 	_ = v.Close()
 
 	server := New(Options{VaultPath: root, Addr: "127.0.0.1:0", LockAfter: 20 * time.Millisecond})
+	defer server.Close()
 	ts := httptest.NewServer(server.routes())
 	defer ts.Close()
 
@@ -489,6 +496,7 @@ func TestIdleTimeoutLocksVault(t *testing.T) {
 	}
 
 	disabled := New(Options{VaultPath: root, Addr: "127.0.0.1:0", LockAfter: 0})
+	defer disabled.Close()
 	tsDisabled := httptest.NewServer(disabled.routes())
 	defer tsDisabled.Close()
 	postJSON(t, tsDisabled.URL+"/api/unlock", map[string]any{"passphrase": "test-passphrase"}, http.StatusOK)
@@ -505,6 +513,7 @@ func TestAssetMergeMovesRelationsAndRedactsCredentialContext(t *testing.T) {
 	_ = v.Close()
 
 	server := New(Options{VaultPath: root, Addr: "127.0.0.1:0"})
+	defer server.Close()
 	ts := httptest.NewServer(server.routes())
 	defer ts.Close()
 
@@ -590,6 +599,7 @@ func TestBulkSetFindingAssetsSyncsAffectedScope(t *testing.T) {
 	_ = v.Close()
 
 	server := New(Options{VaultPath: root, Addr: "127.0.0.1:0"})
+	defer server.Close()
 	ts := httptest.NewServer(server.routes())
 	defer ts.Close()
 
@@ -649,6 +659,7 @@ func TestEvidenceOCRStatusUnavailableAndNonImageRejected(t *testing.T) {
 	_ = v.Close()
 
 	server := New(Options{VaultPath: root, Addr: "127.0.0.1:0"})
+	defer server.Close()
 	ts := httptest.NewServer(server.routes())
 	defer ts.Close()
 
@@ -668,7 +679,12 @@ func TestEvidenceOCRStatusUnavailableAndNonImageRejected(t *testing.T) {
 func TestEvidenceOCRWithFakeTesseractUpdatesSearchAndCitationBundle(t *testing.T) {
 	binDir := t.TempDir()
 	tesseract := filepath.Join(binDir, "tesseract")
-	if err := os.WriteFile(tesseract, []byte("#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'tesseract 5.3.0'; exit 0; fi\necho 'Jenkins console output anonymous read visible'\n"), 0o755); err != nil {
+	contents := "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'tesseract 5.3.0'; exit 0; fi\necho 'Jenkins console output anonymous read visible'\n"
+	if runtime.GOOS == "windows" {
+		tesseract += ".bat"
+		contents = "@echo off\r\nif \"%1\"==\"--version\" (\r\n  echo tesseract 5.3.0\r\n  exit /b 0\r\n)\r\necho Jenkins console output anonymous read visible\r\n"
+	}
+	if err := os.WriteFile(tesseract, []byte(contents), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", binDir)
@@ -680,6 +696,7 @@ func TestEvidenceOCRWithFakeTesseractUpdatesSearchAndCitationBundle(t *testing.T
 	_ = v.Close()
 
 	server := New(Options{VaultPath: root, Addr: "127.0.0.1:0"})
+	defer server.Close()
 	ts := httptest.NewServer(server.routes())
 	defer ts.Close()
 
@@ -715,6 +732,7 @@ func TestWebImportEndpointsForBurpNessusAndBloodHound(t *testing.T) {
 	_ = v.Close()
 
 	server := New(Options{VaultPath: root, Addr: "127.0.0.1:0"})
+	defer server.Close()
 	ts := httptest.NewServer(server.routes())
 	defer ts.Close()
 
