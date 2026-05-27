@@ -301,16 +301,31 @@ func (a *App) noteCmd() *cobra.Command {
 				return err
 			}
 			defer v.Close()
-			id, err := v.AddRecord("note", map[string]any{"text": args[0], "asset": asset, "tags": stringSlice(tags)})
-			if err != nil {
-				return err
-			}
+			var findingRec *vault.Record
 			if finding != "" {
 				rec, err := v.FindOne("finding", finding)
 				if err != nil {
 					return err
 				}
-				if err := v.AddLink(rec.ID, id, "has_note"); err != nil {
+				findingRec = &rec
+			}
+			var linkedAsset *vault.Record
+			if rec, ok, err := matchAssetReference(v, asset); err != nil {
+				return err
+			} else if ok {
+				linkedAsset = &rec
+			}
+			id, err := v.AddRecord("note", map[string]any{"text": args[0], "asset": asset, "tags": stringSlice(tags)})
+			if err != nil {
+				return err
+			}
+			if findingRec != nil {
+				if err := v.AddLink(findingRec.ID, id, "has_note"); err != nil {
+					return err
+				}
+			}
+			if linkedAsset != nil {
+				if err := v.AddLink(id, linkedAsset.ID, "note_asset"); err != nil {
 					return err
 				}
 			}
@@ -327,7 +342,7 @@ func (a *App) noteCmd() *cobra.Command {
 func (a *App) evidenceCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "evidence", Short: "Manage evidence."}
 	var finding, kind, caption string
-	var tags []string
+	var tags, linkedAssets []string
 	add := &cobra.Command{
 		Use:   "add <path>",
 		Short: "Encrypt and attach an evidence file.",
@@ -338,6 +353,23 @@ func (a *App) evidenceCmd() *cobra.Command {
 				return err
 			}
 			defer v.Close()
+			var findingRec *vault.Record
+			var inheritedAssets []vault.Record
+			if finding != "" {
+				rec, err := v.FindOne("finding", finding)
+				if err != nil {
+					return err
+				}
+				findingRec = &rec
+				inheritedAssets, err = v.Linked(rec.ID, "affects_asset")
+				if err != nil {
+					return err
+				}
+			}
+			explicitAssets, err := resolveAssets(v, linkedAssets)
+			if err != nil {
+				return err
+			}
 			blobID, err := v.StoreBlob(args[0])
 			if err != nil {
 				return err
@@ -352,14 +384,13 @@ func (a *App) evidenceCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if finding != "" {
-				rec, err := v.FindOne("finding", finding)
-				if err != nil {
+			if findingRec != nil {
+				if err := v.AddLink(findingRec.ID, id, "has_evidence"); err != nil {
 					return err
 				}
-				if err := v.AddLink(rec.ID, id, "has_evidence"); err != nil {
-					return err
-				}
+			}
+			if err := addAssetLinks(v, id, "evidence_asset", append(inheritedAssets, explicitAssets...)); err != nil {
+				return err
 			}
 			fmt.Printf("Added evidence %s with blob %s\n", id, blobID)
 			return nil
@@ -368,6 +399,7 @@ func (a *App) evidenceCmd() *cobra.Command {
 	add.Flags().StringVar(&finding, "finding", "", "finding title or ID")
 	add.Flags().StringVar(&kind, "kind", "file", "evidence kind")
 	add.Flags().StringVar(&caption, "caption", "", "evidence caption")
+	add.Flags().StringArrayVar(&linkedAssets, "asset", nil, "existing asset ID, name, or value to link")
 	add.Flags().StringArrayVar(&tags, "tag", nil, "tag")
 	ocrCmd := &cobra.Command{
 		Use:   "ocr <evidence-id>",
@@ -394,7 +426,7 @@ func (a *App) evidenceCmd() *cobra.Command {
 func (a *App) credCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "cred", Short: "Manage credentials."}
 	var username, secret, scope string
-	var tags []string
+	var tags, linkedAssets []string
 	add := &cobra.Command{
 		Use:   "add <name>",
 		Short: "Add an encrypted credential.",
@@ -413,6 +445,10 @@ func (a *App) credCmd() *cobra.Command {
 				return err
 			}
 			defer v.Close()
+			assets, err := resolveAssets(v, linkedAssets)
+			if err != nil {
+				return err
+			}
 			id, err := v.AddRecord("credential", map[string]any{
 				"name":     args[0],
 				"username": username,
@@ -423,6 +459,9 @@ func (a *App) credCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if err := addAssetLinks(v, id, "credential_asset", assets); err != nil {
+				return err
+			}
 			fmt.Printf("Added credential %s: %s\n", id, args[0])
 			return nil
 		},
@@ -430,6 +469,7 @@ func (a *App) credCmd() *cobra.Command {
 	add.Flags().StringVar(&username, "username", "", "credential username")
 	add.Flags().StringVar(&secret, "secret", "", "credential secret")
 	add.Flags().StringVar(&scope, "scope", "", "credential scope")
+	add.Flags().StringArrayVar(&linkedAssets, "asset", nil, "existing asset ID, name, or value to link")
 	add.Flags().StringArrayVar(&tags, "tag", nil, "tag")
 	cmd.AddCommand(add)
 	return cmd
@@ -915,6 +955,20 @@ func resolveAssets(v *vault.Vault, selectors []string) ([]vault.Record, error) {
 	return records, nil
 }
 
+func addAssetLinks(v *vault.Vault, srcID, relation string, assets []vault.Record) error {
+	seen := map[string]bool{}
+	for _, asset := range assets {
+		if asset.ID == "" || seen[asset.ID] {
+			continue
+		}
+		seen[asset.ID] = true
+		if err := v.AddLink(srcID, asset.ID, relation); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func resolveAsset(v *vault.Vault, selector string) (vault.Record, error) {
 	selector = strings.TrimSpace(selector)
 	if selector == "" {
@@ -954,6 +1008,25 @@ func resolveAsset(v *vault.Vault, selector string) (vault.Record, error) {
 		return vault.Record{}, fmt.Errorf("ambiguous asset %q; matches: %s", selector, assetLabels(partialMatches))
 	}
 	return vault.Record{}, fmt.Errorf("asset not found: %s (create it with `asset add` first)", selector)
+}
+
+func matchAssetReference(v *vault.Vault, selector string) (vault.Record, bool, error) {
+	selector = strings.TrimSpace(selector)
+	if selector == "" {
+		return vault.Record{}, false, nil
+	}
+	records, err := v.Records("asset")
+	if err != nil {
+		return vault.Record{}, false, err
+	}
+	for _, rec := range records {
+		if strings.EqualFold(rec.ID, selector) ||
+			strings.EqualFold(payloadString(rec.Payload, "name"), selector) ||
+			strings.EqualFold(payloadString(rec.Payload, "value"), selector) {
+			return rec, true, nil
+		}
+	}
+	return vault.Record{}, false, nil
 }
 
 func assetLabels(records []vault.Record) string {

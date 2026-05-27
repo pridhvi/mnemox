@@ -103,6 +103,7 @@ mnemox > asset add ci.acme.local --type host
 mnemox > finding add "Jenkins anonymous read" --severity Medium --summary "Jenkins allowed unauthenticated read access." --affected-scope ci.acme.local --asset ci.acme.local
 mnemox > note "Build history was visible" --finding "Jenkins anonymous read" --asset ci.acme.local
 mnemox > evidence add ./jenkins.txt --finding "Jenkins anonymous read" --caption "Dashboard visible without authentication"
+mnemox > cred add svc_jenkins --username svc_jenkins --asset ci.acme.local
 mnemox > cvss score "Jenkins anonymous read" --av N --ac L --at N --pr N --ui N --vc L --vi N --va N --sc N --si N --sa N
 mnemox > packet build "Jenkins anonymous read"
 ```
@@ -122,6 +123,9 @@ batch jobs where the process environment exposure is understood.
 `finding add --asset` or `finding asset link` to create the typed asset
 relationship that powers attack paths, asset filters, and cited asset packets.
 The asset must already exist; create it with `asset add` first.
+`note --asset`, `evidence add --asset`, and `cred add --asset` also create
+typed asset relationships when they point at existing assets. Evidence added to
+a finding automatically inherits that finding's affected asset links.
 
 ## Commands
 
@@ -129,10 +133,10 @@ The asset must already exist; create it with `asset add` first.
 - `finding add`: create a finding. Add `--asset <asset>` to link existing affected assets by ID, name, or value.
 - `finding asset link/unlink`: manage affected asset relationships for a finding.
 - `asset add/list`: create and list assets.
-- `note`: add an operator note.
-- `evidence add`: encrypt and attach a file as evidence.
+- `note`: add an operator note. Add `--asset <asset>` to link a matching existing asset.
+- `evidence add`: encrypt and attach a file as evidence. Add `--asset <asset>` to link existing assets, or attach it to a finding to inherit affected assets.
 - `evidence ocr`: manually extract local OCR text from screenshot evidence when `tesseract` is installed.
-- `cred add`: add an encrypted credential record.
+- `cred add`: add an encrypted credential record. Add `--asset <asset>` to link existing assets.
 - `import nmap`: import Nmap XML hosts/services as assets.
 - `import nuclei`: import nuclei JSONL findings and assets.
 - `import burp`: import Burp Suite XML issues as findings and assets.

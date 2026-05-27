@@ -54,7 +54,7 @@ The primary workflow is the local web UI started with `mnemox serve`. The CLI an
 - List evidence.
 - Preview image evidence.
 - Edit evidence metadata.
-- Link/unlink evidence to assets.
+- Link/unlink evidence to assets through the web UI; CLI evidence can link assets at create time and inherits affected asset links when attached to a finding.
 - Export decrypted evidence blobs through explicit user action.
 - Manually extract OCR text from image evidence with optional local Tesseract, storing output as encrypted evidence metadata.
 
@@ -62,14 +62,14 @@ The primary workflow is the local web UI started with `mnemox serve`. The CLI an
 
 - List credentials without secrets.
 - Create and edit credential metadata.
-- Link/unlink credentials to assets.
+- Link/unlink credentials to assets through the web UI; CLI credentials can link assets at create time.
 - Reveal secrets through explicit user action only.
 
 ### Notes
 
 - Notes can be attached to findings.
 - Standalone Notes module supports detail editing.
-- Notes can link/unlink assets.
+- Notes can link/unlink assets through the web UI; CLI notes link at create time when the asset text matches an existing asset.
 
 ### Search
 

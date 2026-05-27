@@ -9,11 +9,11 @@ jobs:
   web-and-release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
         with:
           go-version: '1.26.3'
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 26
           cache: npm
@@ -46,8 +46,8 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
         with:
           go-version: '1.26.3'
       - run: go test ./...
@@ -68,6 +68,7 @@ jobs:
           printf 'Jenkins dashboard visible without authentication\n' > "$evidence"
           "./bin/mnemox${ext}" --vault "$vault" --passphrase-file "$passfile" init --name "CI Smoke"
           "./bin/mnemox${ext}" --vault "$vault" --passphrase-file "$passfile" asset add ci.acme.local --type host --value 10.0.0.10
-          "./bin/mnemox${ext}" --vault "$vault" --passphrase-file "$passfile" finding add "Jenkins anonymous read" --summary "Jenkins allowed unauthenticated read access." --affected-scope ci.acme.local
+          "./bin/mnemox${ext}" --vault "$vault" --passphrase-file "$passfile" finding add "Jenkins anonymous read" --summary "Jenkins allowed unauthenticated read access." --affected-scope ci.acme.local --asset ci.acme.local
           "./bin/mnemox${ext}" --vault "$vault" --passphrase-file "$passfile" evidence add "$evidence" --finding "Jenkins anonymous read" --caption "Dashboard visible without authentication"
           "./bin/mnemox${ext}" --vault "$vault" --passphrase-file "$passfile" packet build "Jenkins anonymous read" | grep -q "Dashboard visible without authentication"
+          "./bin/mnemox${ext}" --vault "$vault" --passphrase-file "$passfile" packet bundle "Jenkins anonymous read" --asset ci.acme.local | grep -q "## Cited Assets"

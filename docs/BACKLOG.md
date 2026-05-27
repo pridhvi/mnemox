@@ -9,6 +9,7 @@ This is the canonical implementation backlog. Keep it synchronized with code cha
 - [x] Evidence, notes, credentials, assets, and findings keep typed payload helpers in Go.
 - [x] Asset detail view exposes linked findings, evidence, notes, and redacted credentials.
 - [x] Notes can link to assets through typed links.
+- [x] CLI note, evidence, and credential workflows create typed asset links.
 - [x] Asset merge/deduplication workflows.
 
 ## Milestone 2: Finding Workspace

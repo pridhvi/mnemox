@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/pridhvi/mnemox/internal/vault"
 )
 
 func TestEndToEndFindingPacket(t *testing.T) {
@@ -39,6 +41,12 @@ func TestEndToEndFindingPacket(t *testing.T) {
 			t.Fatalf("bundle missing %q:\n%s", want, bundle)
 		}
 	}
+	filteredBundle := run(t, bin, dir, "packet", "bundle", "Jenkins anonymous read", "--asset", "ci.acme.local")
+	for _, want := range []string{"## Cited Assets", "Dashboard visible without authentication", "Build history was visible"} {
+		if !strings.Contains(filteredBundle, want) {
+			t.Fatalf("asset-filtered bundle missing %q:\n%s", want, filteredBundle)
+		}
+	}
 
 	run(t, bin, dir, "finding", "asset", "unlink", "Jenkins anonymous read", "ci.acme.local")
 	unlinkedBundle := run(t, bin, dir, "packet", "bundle", "Jenkins anonymous read")
@@ -49,6 +57,26 @@ func TestEndToEndFindingPacket(t *testing.T) {
 	relinkedBundle := run(t, bin, dir, "packet", "bundle", "Jenkins anonymous read")
 	if !strings.Contains(relinkedBundle, "## Cited Assets") || !strings.Contains(relinkedBundle, "ci.acme.local") {
 		t.Fatalf("expected relinked bundle to cite asset:\n%s", relinkedBundle)
+	}
+
+	run(t, bin, dir, "cred", "add", "svc_jenkins", "--username", "svc_jenkins", "--secret", "redacted", "--asset", "ci.acme.local")
+	t.Setenv("MNEMOX_PASSPHRASE", "test-passphrase")
+	t.Setenv("MNEMOX_ALLOW_INSECURE_PASSPHRASE_ENV", "1")
+	v, err := vault.Open(filepath.Join(dir, ".mnemox"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v.Close()
+	credential, err := v.FindOne("credential", "svc_jenkins")
+	if err != nil {
+		t.Fatal(err)
+	}
+	linkedAssets, err := v.Linked(credential.ID, "credential_asset")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(linkedAssets) != 1 || linkedAssets[0].Payload["name"] != "ci.acme.local" {
+		t.Fatalf("expected credential linked to ci.acme.local, got %#v", linkedAssets)
 	}
 }
 
