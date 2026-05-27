@@ -18,7 +18,8 @@ func TestEndToEndFindingPacket(t *testing.T) {
 	}
 
 	run(t, bin, dir, "init", "--name", "ACME")
-	run(t, bin, dir, "finding", "add", "Jenkins anonymous read", "--summary", "Jenkins allowed unauthenticated read access.", "--affected-scope", "ci.acme.local")
+	run(t, bin, dir, "asset", "add", "ci.acme.local", "--type", "host")
+	run(t, bin, dir, "finding", "add", "Jenkins anonymous read", "--summary", "Jenkins allowed unauthenticated read access.", "--affected-scope", "ci.acme.local", "--asset", "ci.acme.local")
 	run(t, bin, dir, "note", "Build history was visible", "--finding", "Jenkins anonymous read", "--asset", "ci.acme.local")
 	run(t, bin, dir, "evidence", "add", evidence, "--finding", "Jenkins anonymous read", "--caption", "Dashboard visible without authentication")
 	cvss := run(t, bin, dir, "cvss", "score", "Jenkins anonymous read", "--av", "N", "--ac", "L", "--at", "N", "--pr", "N", "--ui", "N", "--vc", "L", "--vi", "N", "--va", "N", "--sc", "N", "--si", "N", "--sa", "N")
@@ -33,10 +34,21 @@ func TestEndToEndFindingPacket(t *testing.T) {
 		}
 	}
 	bundle := run(t, bin, dir, "packet", "bundle", "Jenkins anonymous read")
-	for _, want := range []string{"# Evidence Citation Bundle: Jenkins anonymous read", "Dashboard visible without authentication", "Build history was visible", "[evidence:", "[note:"} {
+	for _, want := range []string{"# Evidence Citation Bundle: Jenkins anonymous read", "## Cited Assets", "ci.acme.local", "Dashboard visible without authentication", "Build history was visible", "[evidence:", "[note:"} {
 		if !strings.Contains(bundle, want) {
 			t.Fatalf("bundle missing %q:\n%s", want, bundle)
 		}
+	}
+
+	run(t, bin, dir, "finding", "asset", "unlink", "Jenkins anonymous read", "ci.acme.local")
+	unlinkedBundle := run(t, bin, dir, "packet", "bundle", "Jenkins anonymous read")
+	if strings.Contains(unlinkedBundle, "## Cited Assets") {
+		t.Fatalf("expected unlinked bundle to omit cited assets:\n%s", unlinkedBundle)
+	}
+	run(t, bin, dir, "finding", "asset", "link", "Jenkins anonymous read", "ci.acme.local")
+	relinkedBundle := run(t, bin, dir, "packet", "bundle", "Jenkins anonymous read")
+	if !strings.Contains(relinkedBundle, "## Cited Assets") || !strings.Contains(relinkedBundle, "ci.acme.local") {
+		t.Fatalf("expected relinked bundle to cite asset:\n%s", relinkedBundle)
 	}
 }
 

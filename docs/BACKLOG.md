@@ -16,6 +16,7 @@ This is the canonical implementation backlog. Keep it synchronized with code cha
 - [x] Web finding list and editor.
 - [x] CVSS v4.0 Base calculator.
 - [x] Finding notes, evidence upload, asset links, and packet preview.
+- [x] CLI finding add/link/unlink commands can manage affected asset relationships.
 - [x] Web asset module for adding and browsing assets.
 - [x] Evidence module metadata edit plus asset link/unlink.
 - [x] Credential module metadata edit plus asset link/unlink.

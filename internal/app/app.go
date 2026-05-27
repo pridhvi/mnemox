@@ -122,7 +122,7 @@ func (a *App) initCmd() *cobra.Command {
 func (a *App) findingCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "finding", Short: "Manage findings."}
 	var severity, status, summary, technical, impact, remediation, validation string
-	var scope, refs []string
+	var scope, refs, linkedAssets []string
 	add := &cobra.Command{
 		Use:   "add <title>",
 		Short: "Add a finding.",
@@ -133,6 +133,10 @@ func (a *App) findingCmd() *cobra.Command {
 				return err
 			}
 			defer v.Close()
+			assets, err := resolveAssets(v, linkedAssets)
+			if err != nil {
+				return err
+			}
 			id, err := v.AddRecord("finding", map[string]any{
 				"title":             args[0],
 				"status":            status,
@@ -150,6 +154,12 @@ func (a *App) findingCmd() *cobra.Command {
 				return err
 			}
 			fmt.Printf("Added finding %s: %s\n", id, args[0])
+			for _, asset := range assets {
+				if err := v.AddLink(id, asset.ID, "affects_asset"); err != nil {
+					return err
+				}
+				fmt.Printf("Linked affected asset %s: %s\n", shortID(asset.ID), assetLabel(asset))
+			}
 			return nil
 		},
 	}
@@ -161,8 +171,62 @@ func (a *App) findingCmd() *cobra.Command {
 	add.Flags().StringVar(&remediation, "remediation", "", "remediation guidance")
 	add.Flags().StringVar(&validation, "validation", "", "fix validation guidance")
 	add.Flags().StringArrayVar(&scope, "affected-scope", nil, "affected asset/scope item")
+	add.Flags().StringArrayVar(&linkedAssets, "asset", nil, "existing asset ID, name, or value to link as affected")
 	add.Flags().StringArrayVar(&refs, "reference", nil, "reference URL or identifier")
-	cmd.AddCommand(add)
+
+	asset := &cobra.Command{Use: "asset", Short: "Link findings to affected assets."}
+	link := &cobra.Command{
+		Use:   "link <finding> <asset>",
+		Short: "Link an affected asset to a finding.",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			v, err := a.openVault()
+			if err != nil {
+				return err
+			}
+			defer v.Close()
+			finding, err := v.FindOne("finding", args[0])
+			if err != nil {
+				return err
+			}
+			asset, err := resolveAsset(v, args[1])
+			if err != nil {
+				return err
+			}
+			if err := v.AddLink(finding.ID, asset.ID, "affects_asset"); err != nil {
+				return err
+			}
+			fmt.Printf("Linked affected asset %s to finding %s\n", shortID(asset.ID), shortID(finding.ID))
+			return nil
+		},
+	}
+	unlink := &cobra.Command{
+		Use:   "unlink <finding> <asset>",
+		Short: "Unlink an affected asset from a finding.",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			v, err := a.openVault()
+			if err != nil {
+				return err
+			}
+			defer v.Close()
+			finding, err := v.FindOne("finding", args[0])
+			if err != nil {
+				return err
+			}
+			asset, err := resolveAsset(v, args[1])
+			if err != nil {
+				return err
+			}
+			if err := v.RemoveLink(finding.ID, asset.ID, "affects_asset"); err != nil {
+				return err
+			}
+			fmt.Printf("Unlinked affected asset %s from finding %s\n", shortID(asset.ID), shortID(finding.ID))
+			return nil
+		},
+	}
+	asset.AddCommand(link, unlink)
+	cmd.AddCommand(add, asset)
 	return cmd
 }
 
@@ -836,6 +900,106 @@ func basicAuthPassword(passwordFile string) (string, error) {
 		return "", err
 	}
 	return strings.TrimRight(string(password), "\r\n"), nil
+}
+
+func resolveAssets(v *vault.Vault, selectors []string) ([]vault.Record, error) {
+	selectors = uniqueNonEmpty(selectors)
+	records := make([]vault.Record, 0, len(selectors))
+	for _, selector := range selectors {
+		rec, err := resolveAsset(v, selector)
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, rec)
+	}
+	return records, nil
+}
+
+func resolveAsset(v *vault.Vault, selector string) (vault.Record, error) {
+	selector = strings.TrimSpace(selector)
+	if selector == "" {
+		return vault.Record{}, fmt.Errorf("asset selector cannot be empty")
+	}
+	records, err := v.Records("asset")
+	if err != nil {
+		return vault.Record{}, err
+	}
+	needle := strings.ToLower(selector)
+	var prefixMatches []vault.Record
+	var partialMatches []vault.Record
+	for _, rec := range records {
+		name := payloadString(rec.Payload, "name")
+		value := payloadString(rec.Payload, "value")
+		if strings.EqualFold(rec.ID, selector) || strings.EqualFold(name, selector) || strings.EqualFold(value, selector) {
+			return rec, nil
+		}
+		if strings.HasPrefix(strings.ToLower(rec.ID), needle) {
+			prefixMatches = append(prefixMatches, rec)
+			continue
+		}
+		if strings.Contains(strings.ToLower(name), needle) || strings.Contains(strings.ToLower(value), needle) {
+			partialMatches = append(partialMatches, rec)
+		}
+	}
+	if len(prefixMatches) == 1 {
+		return prefixMatches[0], nil
+	}
+	if len(prefixMatches) > 1 {
+		return vault.Record{}, fmt.Errorf("ambiguous asset %q; matches: %s", selector, assetLabels(prefixMatches))
+	}
+	if len(partialMatches) == 1 {
+		return partialMatches[0], nil
+	}
+	if len(partialMatches) > 1 {
+		return vault.Record{}, fmt.Errorf("ambiguous asset %q; matches: %s", selector, assetLabels(partialMatches))
+	}
+	return vault.Record{}, fmt.Errorf("asset not found: %s (create it with `asset add` first)", selector)
+}
+
+func assetLabels(records []vault.Record) string {
+	labels := make([]string, 0, len(records))
+	for _, rec := range records {
+		labels = append(labels, assetLabel(rec))
+	}
+	return strings.Join(labels, ", ")
+}
+
+func assetLabel(rec vault.Record) string {
+	name := payloadString(rec.Payload, "name")
+	value := payloadString(rec.Payload, "value")
+	if name == "" {
+		return value
+	}
+	if value == "" || value == name {
+		return name
+	}
+	return fmt.Sprintf("%s (%s)", name, value)
+}
+
+func payloadString(payload map[string]any, key string) string {
+	value, _ := payload[key].(string)
+	return value
+}
+
+func uniqueNonEmpty(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		key := strings.ToLower(value)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, value)
+	}
+	return out
 }
 
 func stringSlice(values []string) []string {

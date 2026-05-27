@@ -34,7 +34,7 @@ The primary workflow is the local web UI started with `mnemox serve`. The CLI an
 ### Findings
 
 - List, create, and edit findings.
-- Link/unlink affected assets.
+- Link/unlink affected assets through the web UI or CLI. Finding `affected_scope` remains report-facing text; typed `affects_asset` links drive asset filters, Attack Paths, and cited asset packets.
 - Bulk edit affected assets from imported scan data and optionally sync affected scope from selected assets.
 - CVSS v4.0 Base calculator with live vector and score.
 - Add notes tied to a finding.

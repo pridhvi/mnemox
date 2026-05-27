@@ -99,7 +99,8 @@ Example console session:
 
 ```text
 mnemox > init --name "ACME External"
-mnemox > finding add "Jenkins anonymous read" --severity Medium --summary "Jenkins allowed unauthenticated read access."
+mnemox > asset add ci.acme.local --type host
+mnemox > finding add "Jenkins anonymous read" --severity Medium --summary "Jenkins allowed unauthenticated read access." --affected-scope ci.acme.local --asset ci.acme.local
 mnemox > note "Build history was visible" --finding "Jenkins anonymous read" --asset ci.acme.local
 mnemox > evidence add ./jenkins.txt --finding "Jenkins anonymous read" --caption "Dashboard visible without authentication"
 mnemox > cvss score "Jenkins anonymous read" --av N --ac L --at N --pr N --ui N --vc L --vi N --va N --sc N --si N --sa N
@@ -117,10 +118,16 @@ For automation, prefer `--passphrase-file` or `--passphrase-stdin`. The
 `MNEMOX_ALLOW_INSECURE_PASSPHRASE_ENV=1` is also set; use it only for CI or
 batch jobs where the process environment exposure is understood.
 
+`finding add --affected-scope` stores report-facing scope text. Use
+`finding add --asset` or `finding asset link` to create the typed asset
+relationship that powers attack paths, asset filters, and cited asset packets.
+The asset must already exist; create it with `asset add` first.
+
 ## Commands
 
 - `init`: create an encrypted local vault.
-- `finding add`: create a finding.
+- `finding add`: create a finding. Add `--asset <asset>` to link existing affected assets by ID, name, or value.
+- `finding asset link/unlink`: manage affected asset relationships for a finding.
 - `asset add/list`: create and list assets.
 - `note`: add an operator note.
 - `evidence add`: encrypt and attach a file as evidence.
