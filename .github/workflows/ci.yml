@@ -40,7 +40,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # Exercise the incoming Windows 2025 / Visual Studio 2026 image before
+        # the windows-latest migration completes.
+        os: [ubuntu-latest, macos-latest, windows-2025-vs2026]
     runs-on: ${{ matrix.os }}
     defaults:
       run:

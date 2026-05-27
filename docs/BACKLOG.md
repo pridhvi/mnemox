@@ -61,6 +61,7 @@ This is the canonical implementation backlog. Keep it synchronized with code cha
 - [x] GitHub Releases binary-only install docs.
 - [x] Release runbook and release notes template.
 - [x] Native Linux, macOS, and Windows CI smoke checks for Go tests and CLI temp-vault workflow.
+- [x] Sample engagement workflow doc covering web-first and CLI automation paths.
 - [ ] Optional Homebrew tap after demand validates the maintenance cost.
 - [ ] Documentation site.
 

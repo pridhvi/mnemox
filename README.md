@@ -191,6 +191,7 @@ bundled with Mnemox; install it separately for your OS and make sure it is on
 
 - Project canon: [docs/PROJECT.md](docs/PROJECT.md)
 - Backlog: [docs/BACKLOG.md](docs/BACKLOG.md)
+- Sample engagement workflow: [docs/SAMPLE_ENGAGEMENT.md](docs/SAMPLE_ENGAGEMENT.md)
 - Codex instructions: [AGENTS.md](AGENTS.md)
 - CI: `.github/workflows/ci.yml`
 - Release config: `.goreleaser.yaml`
