@@ -13,6 +13,9 @@ maintained tap.
 - The tagged release workflow downloads the published Linux `amd64` archive
   after GoReleaser, verifies the checksum and sigstore bundle, and runs a
   temp-vault CLI smoke against the downloaded binary.
+- The tagged release workflow also downloads the published Windows `amd64`
+  archive, verifies the checksum with `Get-FileHash`, and runs a Windows
+  temp-vault CLI smoke against `mnemox.exe`.
 - `tesseract` is optional and not bundled; OCR works only when it is installed
   separately and available on `PATH`.
 
@@ -50,7 +53,8 @@ git push origin vX.Y.Z
 
 The `Release` workflow publishes the GitHub Release. After it completes:
 
-1. Confirm the `published-artifact-smoke` job passed.
+1. Confirm the `published-linux-artifact-smoke` and
+   `published-windows-artifact-smoke` jobs passed.
 2. Confirm all six binary archives are attached.
 3. Confirm `checksums.txt` and `checksums.txt.sigstore.json` are attached.
 4. Verify at least one archive checksum locally:

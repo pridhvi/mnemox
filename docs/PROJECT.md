@@ -109,9 +109,10 @@ The primary workflow is the local web UI started with `mnemox serve`. The CLI an
 ## Release Posture
 
 - First release channel is GitHub Releases only, with signed checksum artifacts.
-- Tagged releases run a published-artifact smoke job after GoReleaser: download
+- Tagged releases run published-artifact smoke jobs after GoReleaser: download
   the Linux `amd64` archive from GitHub Releases, verify `checksums.txt` and its
-  sigstore bundle, then run a temp-vault CLI packet/backup smoke.
+  sigstore bundle, run a temp-vault CLI packet/backup smoke, then repeat the
+  archive checksum and temp-vault smoke on the Windows `amd64` zip.
 - macOS and Linux are supported for `amd64` and `arm64`.
 - Windows `amd64` and `arm64` binaries are published as preview artifacts until Windows runtime usage has more mileage.
 - Homebrew is deferred until there is user demand for a maintained tap.

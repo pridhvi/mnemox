@@ -33,7 +33,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  published-artifact-smoke:
+  published-linux-artifact-smoke:
     needs: goreleaser
     runs-on: ubuntu-latest
     permissions:
@@ -121,3 +121,111 @@ jobs:
             echo 'credential secret leaked into packet output' >&2
             exit 1
           fi
+
+  published-windows-artifact-smoke:
+    needs: goreleaser
+    runs-on: windows-2025-vs2026
+    permissions:
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - name: Download published Windows release artifact
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = $env:TAG.TrimStart('v')
+          New-Item -ItemType Directory -Path artifact-smoke -Force | Out-Null
+          gh release download $env:TAG `
+            --repo $env:REPO `
+            --pattern checksums.txt `
+            --pattern "mnemox_${version}_windows_amd64.zip" `
+            --dir artifact-smoke
+      - name: Verify checksum and extract
+        working-directory: artifact-smoke
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = $env:TAG.TrimStart('v')
+          $archive = "mnemox_${version}_windows_amd64.zip"
+          $expectedLine = Get-Content checksums.txt | Where-Object { $_.Trim().EndsWith(" $archive") }
+          if (-not $expectedLine) {
+            throw "checksum entry not found for $archive"
+          }
+          $expected = ($expectedLine -split '\s+')[0].ToLowerInvariant()
+          $actual = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) {
+            throw "checksum mismatch for $archive`: expected $expected, got $actual"
+          }
+          Expand-Archive -Path $archive -DestinationPath . -Force
+          if (-not (Test-Path .\mnemox.exe)) {
+            throw 'mnemox.exe missing from Windows archive'
+          }
+      - name: Run published Windows binary temp-vault smoke
+        working-directory: artifact-smoke
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $work = Join-Path $env:RUNNER_TEMP ([Guid]::NewGuid().ToString())
+          New-Item -ItemType Directory -Path $work -Force | Out-Null
+          try {
+            $passfile = Join-Path $work 'passphrase'
+            $vault = Join-Path $work 'vault'
+            $evidence = Join-Path $work 'jenkins-dashboard.txt'
+            $packet = Join-Path $work 'packet.md'
+            $backup = Join-Path $work 'smoke.mnemoxbak'
+
+            [IO.File]::WriteAllText($passfile, "release-artifact-smoke-passphrase`n")
+            [IO.File]::WriteAllText($evidence, "Jenkins dashboard visible without authentication`n")
+
+            .\mnemox.exe --vault $vault --passphrase-file $passfile init --name "Release Artifact Smoke"
+            .\mnemox.exe --vault $vault --passphrase-file $passfile `
+              asset add ci.acme.local --type host --value 10.0.0.10
+            .\mnemox.exe --vault $vault --passphrase-file $passfile `
+              finding add "Jenkins anonymous read" `
+              --severity Medium `
+              --summary "Jenkins allowed unauthenticated read access." `
+              --affected-scope ci.acme.local `
+              --asset ci.acme.local
+            .\mnemox.exe --vault $vault --passphrase-file $passfile `
+              note "Build history was visible." `
+              --finding "Jenkins anonymous read" `
+              --asset ci.acme.local
+            .\mnemox.exe --vault $vault --passphrase-file $passfile `
+              evidence add $evidence `
+              --finding "Jenkins anonymous read" `
+              --caption "Dashboard visible without authentication"
+            .\mnemox.exe --vault $vault --passphrase-file $passfile `
+              cred add svc_jenkins `
+              --username svc_jenkins `
+              --secret release-artifact-smoke-secret `
+              --asset ci.acme.local
+            .\mnemox.exe --vault $vault --passphrase-file $passfile `
+              packet bundle "Jenkins anonymous read" `
+              --asset ci.acme.local `
+              --output $packet
+            .\mnemox.exe --vault $vault --passphrase-file $passfile `
+              backup create $backup
+
+            $packetText = Get-Content -Raw $packet
+            foreach ($needle in @(
+              '## Cited Assets',
+              'ci.acme.local',
+              'Build history was visible',
+              'Dashboard visible without authentication'
+            )) {
+              if (-not $packetText.Contains($needle)) {
+                throw "missing packet text: $needle"
+              }
+            }
+            if ($packetText.Contains('release-artifact-smoke-secret')) {
+              throw 'credential secret leaked into packet output'
+            }
+            if (-not (Test-Path $backup) -or (Get-Item $backup).Length -le 0) {
+              throw 'backup file was not created'
+            }
+          } finally {
+            Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
+          }
