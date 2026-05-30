@@ -10,6 +10,9 @@ maintained tap.
 - Windows `amd64` and `arm64` archives are published as preview artifacts.
 - Archives are `.tar.gz` for macOS/Linux and `.zip` for Windows.
 - `checksums.txt` is signed with cosign as `checksums.txt.sigstore.json`.
+- The tagged release workflow downloads the published Linux `amd64` archive
+  after GoReleaser, verifies the checksum and sigstore bundle, and runs a
+  temp-vault CLI smoke against the downloaded binary.
 - `tesseract` is optional and not bundled; OCR works only when it is installed
   separately and available on `PATH`.
 
@@ -47,15 +50,16 @@ git push origin vX.Y.Z
 
 The `Release` workflow publishes the GitHub Release. After it completes:
 
-1. Confirm all six binary archives are attached.
-2. Confirm `checksums.txt` and `checksums.txt.sigstore.json` are attached.
-3. Verify at least one archive checksum locally:
+1. Confirm the `published-artifact-smoke` job passed.
+2. Confirm all six binary archives are attached.
+3. Confirm `checksums.txt` and `checksums.txt.sigstore.json` are attached.
+4. Verify at least one archive checksum locally:
 
    ```bash
    shasum -a 256 -c checksums.txt --ignore-missing
    ```
 
-4. Verify the signed checksum bundle:
+5. Verify the signed checksum bundle:
 
    ```bash
    cosign verify-blob checksums.txt \
@@ -64,5 +68,4 @@ The `Release` workflow publishes the GitHub Release. After it completes:
      --certificate-oidc-issuer https://token.actions.githubusercontent.com
    ```
 
-5. Fill the release body from `.github/release-notes-template.md`.
-
+6. Fill the release body from `.github/release-notes-template.md`.

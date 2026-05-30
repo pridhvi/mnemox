@@ -62,6 +62,7 @@ This is the canonical implementation backlog. Keep it synchronized with code cha
 - [x] Release runbook and release notes template.
 - [x] Native Linux, macOS, and Windows CI smoke checks for Go tests and CLI temp-vault workflow.
 - [x] Sample engagement workflow doc covering web-first and CLI automation paths.
+- [x] Tagged release job that downloads the published Linux archive, verifies checksums/signature, and runs a temp-vault CLI smoke.
 - [ ] Optional Homebrew tap after demand validates the maintenance cost.
 - [ ] Documentation site.
 

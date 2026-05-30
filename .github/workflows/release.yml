@@ -32,3 +32,92 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  published-artifact-smoke:
+    needs: goreleaser
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+      CHECKSUM_CERT_ID: https://github.com/${{ github.repository }}/.github/workflows/release.yml@refs/tags/${{ github.ref_name }}
+    steps:
+      - uses: sigstore/cosign-installer@v3
+      - name: Download published release artifacts
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          mkdir -p artifact-smoke
+          gh release download "$TAG" \
+            --repo "$REPO" \
+            --pattern checksums.txt \
+            --pattern checksums.txt.sigstore.json \
+            --pattern "mnemox_${version}_linux_amd64.tar.gz" \
+            --dir artifact-smoke
+      - name: Verify checksum and signature
+        working-directory: artifact-smoke
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          sha256sum -c checksums.txt --ignore-missing
+          cosign verify-blob checksums.txt \
+            --bundle checksums.txt.sigstore.json \
+            --certificate-identity "$CHECKSUM_CERT_ID" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com
+          tar -xzf "mnemox_${version}_linux_amd64.tar.gz"
+          chmod +x mnemox
+      - name: Run published binary temp-vault smoke
+        working-directory: artifact-smoke
+        run: |
+          set -euo pipefail
+          work="$(mktemp -d)"
+          trap 'rm -rf "$work"' EXIT
+
+          passfile="$work/passphrase"
+          vault="$work/vault"
+          evidence="$work/jenkins-dashboard.txt"
+          packet="$work/packet.md"
+
+          printf 'release-artifact-smoke-passphrase\n' > "$passfile"
+          printf 'Jenkins dashboard visible without authentication\n' > "$evidence"
+
+          ./mnemox --vault "$vault" --passphrase-file "$passfile" init --name "Release Artifact Smoke"
+          ./mnemox --vault "$vault" --passphrase-file "$passfile" \
+            asset add ci.acme.local --type host --value 10.0.0.10
+          ./mnemox --vault "$vault" --passphrase-file "$passfile" \
+            finding add "Jenkins anonymous read" \
+            --severity Medium \
+            --summary "Jenkins allowed unauthenticated read access." \
+            --affected-scope ci.acme.local \
+            --asset ci.acme.local
+          ./mnemox --vault "$vault" --passphrase-file "$passfile" \
+            note "Build history was visible." \
+            --finding "Jenkins anonymous read" \
+            --asset ci.acme.local
+          ./mnemox --vault "$vault" --passphrase-file "$passfile" \
+            evidence add "$evidence" \
+            --finding "Jenkins anonymous read" \
+            --caption "Dashboard visible without authentication"
+          ./mnemox --vault "$vault" --passphrase-file "$passfile" \
+            cred add svc_jenkins \
+            --username svc_jenkins \
+            --secret release-artifact-smoke-secret \
+            --asset ci.acme.local
+          ./mnemox --vault "$vault" --passphrase-file "$passfile" \
+            packet bundle "Jenkins anonymous read" \
+            --asset ci.acme.local \
+            --output "$packet"
+          ./mnemox --vault "$vault" --passphrase-file "$passfile" \
+            backup create "$work/smoke.mnemoxbak"
+
+          grep -q '## Cited Assets' "$packet"
+          grep -q 'ci.acme.local' "$packet"
+          grep -q 'Build history was visible' "$packet"
+          grep -q 'Dashboard visible without authentication' "$packet"
+          test -s "$work/smoke.mnemoxbak"
+          if grep -q 'release-artifact-smoke-secret' "$packet"; then
+            echo 'credential secret leaked into packet output' >&2
+            exit 1
+          fi
