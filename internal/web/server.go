@@ -1302,10 +1302,10 @@ func (s *Server) handleAttackPaths(w http.ResponseWriter, r *http.Request) {
 	}
 	items := make([]map[string]any, 0, len(assets))
 	for _, asset := range assets {
-		findings, _ := v.LinkedFrom(asset.ID, "affects_asset")
-		evidence, _ := v.LinkedFrom(asset.ID, "evidence_asset")
-		notes, _ := v.LinkedFrom(asset.ID, "note_asset")
-		credentials, _ := v.LinkedFrom(asset.ID, "credential_asset")
+		findings, _ := linkedFromKind(v, asset.ID, "affects_asset", "finding")
+		evidence, _ := linkedFromKind(v, asset.ID, "evidence_asset", "evidence")
+		notes, _ := linkedFromKind(v, asset.ID, "note_asset", "note")
+		credentials, _ := linkedFromKind(v, asset.ID, "credential_asset", "credential")
 		if len(findings)+len(evidence)+len(notes)+len(credentials) == 0 {
 			continue
 		}
@@ -1444,10 +1444,10 @@ func mergeAssetRecords(v *vault.Vault, primaryID, duplicateID string) (map[strin
 }
 
 func assetDetailResponse(v *vault.Vault, rec vault.Record) map[string]any {
-	findings, _ := v.LinkedFrom(rec.ID, "affects_asset")
-	evidence, _ := v.LinkedFrom(rec.ID, "evidence_asset")
-	notes, _ := v.LinkedFrom(rec.ID, "note_asset")
-	credentials, _ := v.LinkedFrom(rec.ID, "credential_asset")
+	findings, _ := linkedFromKind(v, rec.ID, "affects_asset", "finding")
+	evidence, _ := linkedFromKind(v, rec.ID, "evidence_asset", "evidence")
+	notes, _ := linkedFromKind(v, rec.ID, "note_asset", "note")
+	credentials, _ := linkedFromKind(v, rec.ID, "credential_asset", "credential")
 	response := recordResponse(rec)
 	response["findings"] = recordList(findings, false)
 	response["evidence"] = recordList(evidence, false)
@@ -1619,7 +1619,7 @@ func (s *Server) assetRelatedRecords(assetID, kind string) ([]vault.Record, erro
 			out = append(out, asset)
 			continue
 		}
-		records, err := v.LinkedFrom(assetID, rel.name)
+		records, err := linkedFromKind(v, assetID, rel.name, rel.kind)
 		if err != nil {
 			return nil, err
 		}
@@ -1977,6 +1977,20 @@ func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]any{"error": message})
 }
 
+func linkedFromKind(v *vault.Vault, dstID, relation, kind string) ([]vault.Record, error) {
+	records, err := v.LinkedFrom(dstID, relation)
+	if err != nil {
+		return nil, err
+	}
+	filtered := records[:0]
+	for _, rec := range records {
+		if rec.Kind == kind {
+			filtered = append(filtered, rec)
+		}
+	}
+	return filtered, nil
+}
+
 func recordList(records []vault.Record, redactCredential bool) []map[string]any {
 	items := make([]map[string]any, 0, len(records))
 	for _, rec := range records {
@@ -2015,7 +2029,7 @@ func recordResponse(rec vault.Record) map[string]any {
 
 func sanitizeRecord(rec vault.Record, redactCredential bool) map[string]any {
 	payload := cloneMap(rec.Payload)
-	if redactCredential && rec.Kind == "credential" {
+	if rec.Kind == "credential" {
 		delete(payload, "secret")
 		payload["has_secret"] = true
 	}

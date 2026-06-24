@@ -200,8 +200,19 @@ func TestWebAPIWorkflowAndCredentialRedaction(t *testing.T) {
 	if len(assetDetail["credentials"].([]any)) != 1 {
 		t.Fatalf("expected linked credential in asset detail: %#v", assetDetail)
 	}
+	if _, err := server.currentVault().DB.Exec(`INSERT INTO links(id, src_id, dst_id, relation, created_at) VALUES (?, ?, ?, ?, ?)`, "tampered-note-link", credential["id"].(string), assetID, "note_asset", time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	tamperedAssetDetail := getJSON(t, ts.URL+"/api/assets/"+assetID, http.StatusOK)
+	encoded, _ := json.Marshal(tamperedAssetDetail)
+	if strings.Contains(string(encoded), "super-secret-value") {
+		t.Fatalf("tampered asset detail leaked credential secret: %s", encoded)
+	}
+	if len(tamperedAssetDetail["notes"].([]any)) != 1 {
+		t.Fatalf("tampered asset detail included credential as note: %#v", tamperedAssetDetail["notes"])
+	}
 	credentials := getJSON(t, ts.URL+"/api/credentials", http.StatusOK)
-	encoded, _ := json.Marshal(credentials)
+	encoded, _ = json.Marshal(credentials)
 	if strings.Contains(string(encoded), "super-secret-value") {
 		t.Fatalf("credential list leaked secret: %s", encoded)
 	}
